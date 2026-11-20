@@ -9,8 +9,12 @@ needs to be retrofitted.
 - [ ] Secure Enclave key with `.userPresence` in a Developer ID–signed app (no provisioning profile).
       Decides the approval design (see [THREAT_MODEL.md, T-3](THREAT_MODEL.md#t-3-approval-forgery)).
       Code and test checklist: [spikes/secure-enclave](../spikes/secure-enclave/).
+      **Status:** passed on a macOS VM (Apple Development build). Approach C, the key blob in the login keychain
+      behind a code-signing access list, is the provisional design. Still needed: a physical Mac with Touch ID,
+      and Developer ID builds (V3/V5).
 - [ ] `SMAppService` daemon registration, approval in System Settings, and `setCodeSigningRequirement` on both
-      ends of the XPC connection.
+      ends of the XPC connection. Also: the console-session check for approvals (finding F4), and enrolling the
+      approval key with admin authorization.
 - [ ] Swift MCP SDK: stdio, output schemas, annotations, and Tasks extension support for the 2026-07-28 spec.
 - [ ] Signing and notarization pipeline in GitHub Actions, plus a Homebrew cask.
 - [ ] Fixture capture script for Apple CLI outputs on macOS 14, 15, and 26.

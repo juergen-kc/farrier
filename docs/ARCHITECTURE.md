@@ -72,9 +72,9 @@ fixture tests for every supported macOS version.
   synchronous fallback when the client doesn't support it.
 - Exposes **resources** (`farrier://posture/latest`, `farrier://snapshot/{id}`,
   `farrier://journal/recent`) and **prompts** (debugging runbooks).
-- There is no `apply` path that bypasses on-device approval. Approval comes from LocalAuthentication,
-  not from MCP elicitation, because elicitation is answered by the AI client, which is the thing we don't fully
-  trust.
+- There is no `apply` path that bypasses on-device approval. Approval is a Touch ID or password prompt for
+  the Secure Enclave approval key (see [Approve](#plan-approve-apply)), not MCP elicitation. Elicitation is
+  answered by the AI client, which is the thing we don't fully trust.
 
 ### `farrier-helper` (privileged helper)
 
@@ -96,6 +96,8 @@ fixture tests for every supported macOS version.
   | `setSystemSetting(key, value, planProof)` | Change an allowlisted setting (firewall on, stealth mode, etc.) |
   | `uninstallPkgReceipt(id, planProof)` | Remove installer receipts and files listed in a bill of materials (BOM) |
   | `adapterRequest(adapter, op, planProof?)` | Make a signed management-plane call (JumpCloud System Context) |
+  | `beginApproval(planHash)` | Issue a one-time nonce and expiry for one approval (prevents replay) |
+  | `enrollApprovalKey(publicKey)` | Register the approval public key. Requires **admin** authorization (see below) |
 
 - The helper **re-validates** every item itself. It does not trust the client's plan contents.
   It resolves paths with `O_NOFOLLOW` on each path component, checks owner, mode and inode against what the plan
@@ -124,7 +126,8 @@ collect ─▶ match rules ─▶ PLAN ─▶ (human reviews) ─▶ APPROVE ─
                            │                            │          │
                            │ id, hash, ttl, items       │ proof    │ re-validate each item
                            ▼                            ▼          ▼
-                     ~/.farrier/plans/<id>.json   LocalAuthentication  quarantine / helper
+                     ~/.farrier/plans/<id>.json   Secure Enclave       quarantine / helper
+                                                  signature (Touch ID)
 ```
 
 **Plan.** Canonical JSON with `id`, `createdAt`, `expiresAt` (default 15 min), `tier`,
@@ -132,17 +135,55 @@ collect ─▶ match rules ─▶ PLAN ─▶ (human reviews) ─▶ APPROVE ─
 evidence (why it matched and why it's safe), and a fingerprint (device, inode, size, mtime,
 owner). `planHash` is the SHA-256 of the canonical encoding.
 
-**Approve.** For T3 and T4, the user process asks LocalAuthentication to authenticate the user,
-showing a summary of the plan (counts, total size, tier). The approval yields a `planProof`.
+**Approve.** T3 and T4 plans need an approval that the **helper can verify itself**, so a compromised
+user process can't produce one without the user being present.
 
-**SPIKE: approval the helper can verify.** The preferred design is a Secure Enclave P-256 key that is
-created at install with `.userPresence` access control, and whose public key the helper stores in a root-owned file.
-Approval means signing `planHash` with that key, which triggers Touch ID. The helper then checks the
-signature, so a compromised user process can't forge approval without the user's finger.
-Open question: whether Developer ID distribution (no provisioning profile) can create and use
-Secure Enclave keys with the needed keychain entitlement. If it can't, the fallback is
-LocalAuthentication in the signed client, with the helper trusting the code-signing requirement.
-That is weaker, and the threat model records it as such.
+> Status: **provisional.** This design ("Approach C") was chosen from the
+> [Secure Enclave spike](../spikes/secure-enclave/RESULTS.md), run on a macOS VM with an Apple Development build.
+> It becomes final once the core tests pass on a physical Mac with Touch ID and with Developer ID signing.
+
+**The approval key**
+- A P-256 key in the Secure Enclave, created with CryptoKit (`SecureEnclave.P256.Signing.PrivateKey`) and
+  `.userPresence` access control: Touch ID, or the login password as fallback. Every signature prompts,
+  and an earlier unlock is never reused.
+- The key itself never leaves the Secure Enclave. Its `dataRepresentation` is an encrypted blob that only
+  this Mac's Secure Enclave can use. It's stored in the user's **login keychain** as a generic password whose
+  access list trusts **only Farrier's signing identity** (its designated requirement). No entitlement or provisioning profile is needed.
+- The item's label carries the warning, because keychain dialogs display it:
+  *"Farrier approval key — Farrier never asks for this. Click Deny."* (spike finding F2)
+
+Why not keep the blob in a plain file (the spike's "Approach A")? Any process running as the user could
+then use it, and it controls the name and text in the prompt (finding F1). In the keychain, any binary other
+than Farrier gets a keychain dialog plus a login-password request **before** it can reach the signing prompt.
+The same keychain also refuses SSH sessions (finding F4).
+
+**Enrollment**
+- `farrier setup` creates the key and calls the helper's `enrollApprovalKey`. The helper requires **admin**
+  authorization (Authorization Services) for this, so a same-user process can't swap in its own key.
+- The helper stores the public key in a root-owned file. Changing the key later means re-enrolling, which is
+  journaled and needs admin authorization again.
+
+**Approval flow**
+1. The client calls `beginApproval(planHash)`. The helper returns a one-time 32-byte nonce and an expiry
+   (default 5 minutes).
+2. The client builds the payload:
+   `"farrier-plan-approval-v1" 0x00 | planHash (32) | nonce (32) | expiresAt (int64 BE)`.
+3. It reads the key blob from the keychain and signs the payload. That triggers the prompt, whose text Farrier
+   **derives from the plan itself**, never from arguments or agent text. For example:
+   *"farrier is trying to approve plan 3f9a…: delete 2 APFS snapshots (12.4 GB), irreversible."*
+   The prompt names the **executable file name**, so the binary must be called `farrier`.
+4. The signature (ECDSA P-256, DER) is the `planProof`. The helper verifies it against the enrolled public key,
+   checks that the nonce is unused and unexpired, and that `planHash` matches the plan it was given.
+
+**Console-session check (required).** The helper accepts approvals only from the user session at the screen.
+It compares the XPC caller's login session with the console user's session, and rejects remote (SSH) or
+background sessions. The spike showed that a prompt *can* be triggered from SSH and appears on the screen
+(finding F4). The keychain blocks that by default, but not if an attacker who knows the password unlocks the
+keychain over SSH. So this check is mandatory, not optional. Details: **SPIKE**, in the SMAppService/XPC spike.
+
+**Integrity check.** At startup, Farrier reads the key item's access list. If anything other than Farrier is
+trusted (for example, after a user clicked "Always Allow" in an attacker's dialog), Farrier warns and offers to
+rotate the key (re-enrollment requires admin authorization).
 
 **Apply.** `farrier apply <id>` (or the `apply_plan` tool) loads the plan, checks that the
 hash and expiry are valid, and re-fingerprints every item. Any mismatch drops that item and

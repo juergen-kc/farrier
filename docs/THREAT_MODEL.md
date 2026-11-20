@@ -29,8 +29,9 @@
 
 1. **AI client ↔ `farrier mcp`.** Everything that crosses this boundary from the agent is untrusted input.
 2. **`farrier` ↔ `farrier-helper`.** The XPC connection, with a code-signing requirement on both sides.
-3. **Farrier ↔ the human.** The LocalAuthentication prompt. This is the only channel the agent can't
-   speak through.
+3. **Farrier ↔ the human.** The Touch ID or password prompt for signing with the Secure Enclave approval key.
+   This is the only channel the agent can't speak through. The prompt text is derived from the plan inside
+   Farrier.
 4. **Farrier ↔ rule packs.** Bundled packs are signed with the release. User packs are restricted.
 5. **Farrier ↔ management plane.** JumpCloud API calls signed with the device key.
 
@@ -54,17 +55,37 @@
 - The helper **re-derives** everything. It re-matches each item against the rule's allowed roots, resolves
   paths with `O_NOFOLLOW`, checks the owner, refuses hard-linked files with a link count above 1, and
   re-fingerprints before acting.
-- T3 and T4 verbs need a `planProof` (see the approval spike in [ARCHITECTURE.md](ARCHITECTURE.md)).
+- T3 and T4 verbs need a `planProof`: a Secure Enclave signature over the plan hash and a helper-issued nonce
+  (see [ARCHITECTURE.md, Approve](ARCHITECTURE.md#plan-approve-apply)).
 - The helper is written in Swift (memory-safe), keeps its code small, and is the first fuzzing target.
 
 ### T-3. Approval forgery
-- **Preferred:** a plan hash signed by a Secure Enclave key gated by user presence. The helper verifies it.
-  A compromised user process can't forge the signature without the user's finger.
-- **Fallback (if the spike fails):** LocalAuthentication runs in the signed client, and the helper
-  trusts the client's signature. **Residual risk:** code injected into the signed client
-  could skip approval. Hardened runtime and library validation reduce this risk but don't remove it.
-- The approval prompt always states the tier, the item count, the total size, and the most dangerous
-  item, in Farrier's own words.
+> Provisional design, based on the [Secure Enclave spike](../spikes/secure-enclave/RESULTS.md) (macOS VM,
+> Apple Development build). To be confirmed on a physical Mac with Touch ID and with Developer ID signing.
+
+- **The helper verifies approvals itself.** A plan approval is a signature over the plan hash, a helper-issued
+  nonce and an expiry, made by a Secure Enclave key that needs user presence for every signature. The helper
+  checks it against a public key enrolled with admin authorization. A compromised user process can't forge it
+  without the user being present.
+- **The key can only be used by Farrier.** Its blob is stored in the login keychain, with an access list that
+  trusts only Farrier's signing identity. In the spike, every other binary (an ad hoc build, Apple's `security`
+  tool, and a same-team binary with another identifier) got a keychain dialog and a login-password request
+  before reaching the signing prompt. A Farrier update keeps access (spike tests C3 to C5 and C9).
+- **Replay.** Each approval includes a one-time nonce from the helper and expires after 5 minutes.
+- **Misleading prompts.** The prompt names the calling executable by file name, and its text is supplied by
+  the caller (spike F1). Mitigations: only Farrier can use the key (above). Farrier derives the prompt text
+  from the plan itself, never from arguments or agent output. And the plan hash in the prompt is the one the
+  helper executes.
+- **Prompts started remotely (spike F4).** A process in an SSH session *can* trigger a prompt that appears on
+  the Mac's screen. The keychain blocks this by default (`errSecInteractionNotAllowed` in SSH sessions). The
+  helper also **requires the caller to be in the console session**, which covers an attacker who knows the
+  password and unlocks the keychain over SSH.
+- **"Always Allow" (spike F2).** A user could permanently trust an attacker's binary in a keychain dialog. The
+  item label warns against it, and Farrier checks the item's access list at startup and offers to rotate the key.
+- **Residual risks:**
+  - code injected into the genuine, signed Farrier process (reduced by the hardened runtime and library validation)
+  - a user who approves a prompt without reading it
+  - an attacker with the user's password *and* a console session
 
 ### T-4. Symlink and time-of-check races (TOCTOU)
 - Planning records a fingerprint for each item (device, inode, size, mtime, owner).
@@ -118,7 +139,9 @@ hostnames, serial numbers, Wi-Fi network names, app lists and file paths. Mitiga
 
 ## Open questions
 
-- Can a Developer ID–distributed app use Secure Enclave keys with `.userPresence` without a
-  provisioning profile? This decides whether T-3 uses the preferred or the fallback design.
+- Confirm the provisional approval design (T-3) on a physical Mac with Touch ID, and with Developer ID
+  signing, both as a bare binary and inside the app bundle.
+- How exactly does the helper determine the caller's login session and compare it with the console session?
+  (Belongs in the SMAppService/XPC spike.)
 - Should the helper refuse to run while the user session is locked or fast-user-switched?
 - What is the JumpCloud write-back scope, and what can a device actually modify about itself?

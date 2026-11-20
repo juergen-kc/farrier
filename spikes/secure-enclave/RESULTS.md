@@ -57,7 +57,7 @@ Prompt (V2, VM, password fallback). The icon is the generic "exec" icon with a l
 | E2 policies (userPresence / biometryAny / biometryCurrentSet / none) | partial | `none` control on the VM: no prompt, `secondsInSign: 0` (324-byte blob, against 427 for userPresence). Biometry policies need Touch ID. |
 | E3 enrollment change | | |
 | E4 locked screen | ✅ signed after unlock (26.3 s) | no prompt on the lock screen; it appeared after unlock |
-| E5 SSH session | ⚠️ **signed over SSH** | `sshSession: true`, `ok: true`, 5.56 s: a prompt was shown and approved (presumably in the VM's console window; to be confirmed). See F4. |
+| E5 SSH session | ⚠️ **signed over SSH** | `sshSession: true`, `ok: true`, 5.56 s. **Confirmed: the password prompt appeared in the VM's console window** and was approved there. See F4. |
 | E6 started by Claude Code | | parent: |
 | E7 root signs with user key | ❌ as expected | the prompt appeared, juergen's password was not accepted, and the result was LAError -2. Prompted user: ? |
 | E8 other user | | |
@@ -121,7 +121,7 @@ So:
   or recreates the key, if anything other than itself is trusted.
 
 **F4: An approval prompt can be triggered from an SSH session (Approach A).** Over SSH, `a-sign` reached
-user-presence authentication, and the prompt appeared on the console session (to be confirmed). The person at the
+user-presence authentication, and the prompt appeared on the console session (confirmed). The person at the
 desk can't tell that the request came from a remote shell. **Approach C blocks this by default:** the keychain
 read fails with `-25308` in an SSH session (C7, confirmed). That depends on the login keychain refusing
 dialogs to SSH sessions, though. An attacker who knows the user's password could run `security unlock-keychain`
@@ -133,6 +133,8 @@ v0.1, independent of the approach.
 
 ## Decision
 
+- [x] **Provisional (VM, V2 Apple Development): Approach C**, plus a helper check that approvals come from the console
+      session. Docs updated to match. Final once A2/A6 and C1 to C9 pass on a physical Mac with Touch ID and on V3/V5 (Developer ID).
 - [ ] Preferred design: Approach C (variant: ___ )
 - [ ] Approach A, with F1 accepted as residual risk
 - [ ] Approach B with entitlement
@@ -140,4 +142,4 @@ v0.1, independent of the approach.
 
 Additional mitigations needed (for example, from E5):
 
-THREAT_MODEL.md and ARCHITECTURE.md updated: [ ]
+THREAT_MODEL.md and ARCHITECTURE.md updated: [x] (provisional, marked as pending the physical-Mac run)
