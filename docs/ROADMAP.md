@@ -8,6 +8,7 @@ needs to be retrofitted.
 
 - [ ] Secure Enclave key with `.userPresence` in a Developer ID–signed app (no provisioning profile).
       Decides the approval design (see [THREAT_MODEL.md, T-3](THREAT_MODEL.md#t-3-approval-forgery)).
+      Code and test checklist: [spikes/secure-enclave](../spikes/secure-enclave/).
 - [ ] `SMAppService` daemon registration, approval in System Settings, and `setCodeSigningRequirement` on both
       ends of the XPC connection.
 - [ ] Swift MCP SDK: stdio, output schemas, annotations, and Tasks extension support for the 2026-07-28 spec.
