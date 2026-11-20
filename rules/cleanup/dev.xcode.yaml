@@ -1,0 +1,57 @@
+# Example cleanup pack. See docs/RULE_PACKS.md for the format.
+pack:
+  id: dev.xcode
+  title: Xcode developer artifacts
+  version: 1
+
+rules:
+  - id: dev.xcode.derived-data
+    title: Xcode DerivedData
+    kind: cleanup
+    tier: T2
+    targets:
+      - path: ~/Library/Developer/Xcode/DerivedData/*
+        type: directory
+    regenerable: true
+    minAge: 14d
+    when:
+      processNotRunning: [Xcode]
+    evidence: >
+      Build intermediates and indexes. Xcode regenerates them on the next build.
+      Removing them only costs the time of a clean build.
+
+  - id: dev.xcode.archives-old
+    title: Old Xcode archives
+    kind: cleanup
+    tier: T2
+    targets:
+      - path: ~/Library/Developer/Xcode/Archives/*/*.xcarchive
+        type: directory
+    regenerable: false            # archives hold dSYMs needed to symbolicate crash reports
+    minAge: 365d
+    evidence: >
+      Archives of past builds. They contain the dSYMs needed to symbolicate crash reports
+      for those builds. Only remove them if those versions are no longer supported.
+
+  - id: dev.xcode.device-support
+    title: iOS DeviceSupport files for unused OS versions
+    kind: cleanup
+    tier: T2
+    targets:
+      - path: ~/Library/Developer/Xcode/iOS DeviceSupport/*
+        type: directory
+    regenerable: true
+    minAge: 90d
+    evidence: >
+      Debug symbols copied from connected devices. Xcode copies them again the next time
+      a device running that OS version is connected.
+
+  - id: dev.xcode.simulators-unavailable
+    title: Unavailable simulator devices
+    kind: cleanup
+    tier: T2
+    targets:
+      - fact: simctl.devices.unavailable   # collector-provided targets, not a glob
+    regenerable: false
+    evidence: >
+      Simulator devices whose runtime is no longer installed. They can't be booted.

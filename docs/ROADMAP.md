@@ -1,0 +1,54 @@
+# Roadmap
+
+The privileged helper is part of the very first release. Building the trust boundary
+first means every later feature uses the same plan → approve → apply path, so nothing
+needs to be retrofitted.
+
+## v0.0: Spikes (before any public release)
+
+- [ ] Secure Enclave key with `.userPresence` in a Developer ID–signed app (no provisioning profile).
+      Decides the approval design (see [THREAT_MODEL.md, T-3](THREAT_MODEL.md#t-3-approval-forgery)).
+- [ ] `SMAppService` daemon registration, approval in System Settings, and `setCodeSigningRequirement` on both
+      ends of the XPC connection.
+- [ ] Swift MCP SDK: stdio, output schemas, annotations, and Tasks extension support for the 2026-07-28 spec.
+- [ ] Signing and notarization pipeline in GitHub Actions, plus a Homebrew cask.
+- [ ] Fixture capture script for Apple CLI outputs on macOS 14, 15, and 26.
+
+## v0.1: Foundation and posture
+
+- `farrier-helper` with `readPrivileged` and `setSystemSetting` (small allowlist: firewall,
+  stealth mode, automatic update settings)
+- Plan, approve and apply, with the journal
+- `posture.core` pack: about 25 high-value checks with mSCP mappings
+- Managed-device detection (`managed` findings are not fixable locally)
+- `inventory` with signing and notarization status for launchd jobs, login items and extensions
+- CLI with `--json`, and `farrier mcp` exposing posture, inventory and plan tools
+- `--redact`
+
+## v0.2: Cleanup
+
+- Quarantine (user and root), restore, and expiry
+- Cleanup packs: system and user caches, logs, Xcode, simulators, package managers
+  (npm/pnpm/yarn/pip/cargo/gradle), Homebrew, Docker, iOS backups, APFS local snapshots (T3)
+- Developer artifact discovery (`node_modules`, `target`, `.build`, `DerivedData`) under the folders you configure
+- App uninstall with leftovers and receipts
+- `disk_usage` with honest "reclaimable now" and "reclaimable after expiry" numbers
+
+## v0.3: Drift and debugging
+
+- Snapshots and diffs
+- Debugging tools: `log_query`, `power_history`, `crash_reports`, `network_diagnose`,
+  `process_snapshot`, `sysdiagnose_summarize` (Tasks)
+- MCP prompts and runbooks
+
+## v0.4: Patching and adapters
+
+- `updates_list` and `updates_plan` across macOS, Homebrew, the App Store, and third-party apps
+- JumpCloud adapter: status, compare, and optional write-back of findings
+- Adapter SDK documentation, so others can contribute adapters (Jamf, Kandji, Intune, Fleet)
+
+## Later / maybe
+
+- An MCP Apps view to review plans inside the chat
+- Scheduled read-only checks with local notifications
+- Benchmark-level reports (CIS level 1/2, mSCP baselines) exported as Markdown or JSON

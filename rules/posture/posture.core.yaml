@@ -1,0 +1,95 @@
+# Example posture pack. See docs/RULE_PACKS.md for the format.
+# Benchmark mappings are placeholders and must be verified against the current mSCP and CIS releases.
+pack:
+  id: posture.core
+  title: Core macOS security posture
+  version: 1
+
+rules:
+  - id: posture.core.filevault
+    title: FileVault is enabled
+    kind: check
+    severity: high
+    collect: { fact: filevault.status }
+    expect: { equals: "On" }
+    managedBy:
+      - payloadType: com.apple.MCX.FileVault2
+    remediation:
+      automatic: false
+      guidance: >
+        Enable FileVault in System Settings → Privacy & Security → FileVault, or with your
+        MDM so the recovery key is escrowed.
+    mappings:
+      mscp: system_settings_filevault_enforce
+
+  - id: posture.core.sip
+    title: System Integrity Protection is enabled
+    kind: check
+    severity: critical
+    collect: { fact: sip.status }
+    expect: { equals: enabled }
+    remediation:
+      automatic: false
+      guidance: >
+        SIP can only be re-enabled from recoveryOS: run `csrutil enable`, then restart.
+    mappings:
+      mscp: os_sip_enable
+
+  - id: posture.core.gatekeeper
+    title: Gatekeeper is enabled
+    kind: check
+    severity: high
+    collect: { fact: gatekeeper.assessments }
+    expect: { equals: enabled }
+    managedBy:
+      - payloadType: com.apple.systempolicy.control
+    remediation:
+      automatic: true
+      action: gatekeeper.enable          # allowlisted helper setting (T4)
+    mappings:
+      mscp: os_gatekeeper_enable
+
+  - id: posture.core.firewall
+    title: Application firewall is enabled
+    kind: check
+    severity: medium
+    collect: { fact: firewall.globalState }
+    expect: { in: [on, blockAll] }
+    managedBy:
+      - payloadType: com.apple.security.firewall
+    remediation:
+      automatic: true
+      action: firewall.enable
+    mappings:
+      mscp: system_settings_firewall_enable
+
+  - id: posture.core.auto-security-updates
+    title: Security responses and system files install automatically
+    kind: check
+    severity: high
+    collect: { fact: softwareupdate.prefs }
+    expect:
+      all:
+        - { path: CriticalUpdateInstall, equals: true }
+        - { path: ConfigDataInstall, equals: true }
+    managedBy:
+      - payloadType: com.apple.SoftwareUpdate
+      - declarationType: com.apple.configuration.softwareupdate.settings
+    remediation:
+      automatic: true
+      action: softwareupdate.enableSecurityAutoInstall
+
+  - id: posture.core.unsigned-launch-items
+    title: No unsigned or un-notarized launch agents or daemons
+    kind: check
+    severity: high
+    collect: { fact: launchd.items }
+    expect:
+      all:
+        - { each: { path: signature.valid, equals: true } }
+        - { each: { path: signature.notarized, equals: true } }
+    remediation:
+      automatic: false
+      guidance: >
+        Review each flagged item. Identify the owning app, and remove the item with
+        `app_uninstall_plan` if the app is no longer wanted.
