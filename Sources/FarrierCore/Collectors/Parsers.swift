@@ -87,18 +87,25 @@ public enum Parsers {
 
     /// `profiles show -output stdout-xml` (as root) → sorted, unique payload types of the computer-level profiles.
     /// With no profiles installed, `profiles` prints a sentence instead of a plist; that's an empty list, not unknown.
+    ///
+    /// Strict, because an incomplete list would make a managed setting look unmanaged (and fixable): anything that
+    /// isn't exactly that sentence or a plist with well-formed computer-level profiles is nil (unknown).
     public static func profilePayloadTypes(_ output: Data) -> FactValue? {
         let text = String(decoding: output, as: UTF8.self)
-        if text.contains("There are no configuration profiles installed") { return .array([]) }
-        guard let start = text.range(of: "<?xml") ?? text.range(of: "<plist"),
-              let root = propertyList(Data(text[start.lowerBound...].utf8))?.object else { return nil }
+        guard let start = text.range(of: "<?xml") ?? text.range(of: "<plist") else {
+            // Only the bare diagnostic counts; the same sentence inside profile metadata never reaches this point.
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed == "There are no configuration profiles installed" ? .array([]) : nil
+        }
+        guard let root = propertyList(Data(text[start.lowerBound...].utf8))?.object else { return nil }
         guard let profiles = root["_computerlevel"] else { return .array([]) }  // only user-level profiles
         guard let list = profiles.array else { return nil }
         var types = Set<String>()
         for profile in list {
-            guard let items = profile.object?["ProfileItems"]?.array else { continue }
+            guard let items = profile.object?["ProfileItems"]?.array else { return nil }
             for item in items {
-                if let t = item.object?["PayloadType"]?.string { types.insert(t) }
+                guard let t = item.object?["PayloadType"]?.string, !t.isEmpty else { return nil }
+                types.insert(t)
             }
         }
         return .array(types.sorted().map(FactValue.string))

@@ -93,6 +93,26 @@ struct ParserTests {
         #expect(Parsers.profilePayloadTypes(Data(userOnly.utf8)) == .array([]))
         // Anything else stays unknown.
         #expect(Parsers.profilePayloadTypes(Data("profiles: this command requires root\n".utf8)) == nil)
+        #expect(Parsers.profilePayloadTypes(Data("Error: There are no configuration profiles installed? maybe\n".utf8)) == nil)
+    }
+
+    @Test func profilePayloadTypesFailClosed() {
+        func plist(_ profiles: String) -> Data {
+            Data(#"<?xml version="1.0"?><plist version="1.0"><dict><key>_computerlevel</key><array>\#(profiles)</array></dict></plist>"#.utf8)
+        }
+        let firewall = "<dict><key>PayloadType</key><string>com.apple.security.firewall</string></dict>"
+        // The no-profiles sentence inside a real profile's metadata must not empty the inventory.
+        let named = plist("<dict><key>ProfileDisplayName</key><string>There are no configuration profiles installed</string>"
+                          + "<key>ProfileItems</key><array>\(firewall)</array></dict>")
+        #expect(Parsers.profilePayloadTypes(named) == .array([.string("com.apple.security.firewall")]))
+        // A profile without ProfileItems, ProfileItems that isn't a list, or an item without a string PayloadType:
+        // the inventory would be incomplete, so it's unknown.
+        #expect(Parsers.profilePayloadTypes(plist("<dict><key>ProfileIdentifier</key><string>x</string></dict>")) == nil)
+        #expect(Parsers.profilePayloadTypes(plist("<dict><key>ProfileItems</key><string>x</string></dict>")) == nil)
+        #expect(Parsers.profilePayloadTypes(plist("<dict><key>ProfileItems</key><array>\(firewall)<dict/></array></dict>")) == nil)
+        #expect(Parsers.profilePayloadTypes(plist("<dict><key>ProfileItems</key><array><dict><key>PayloadType</key><integer>1</integer></dict></array></dict>")) == nil)
+        // A profile with an empty ProfileItems list is well-formed.
+        #expect(Parsers.profilePayloadTypes(plist("<dict><key>ProfileItems</key><array/></dict>")) == .array([]))
     }
 
     @Test func unrecognisedValuesAreNil() {
