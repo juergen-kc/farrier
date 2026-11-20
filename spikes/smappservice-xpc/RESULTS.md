@@ -6,33 +6,39 @@ Fill this in while working through [CHECKLIST.md](CHECKLIST.md). Pasting JSON li
 
 | | |
 |---|---|
-| Date | |
-| Mac model / VM | |
-| macOS version | |
-| Signing identity | |
-| Compile fixes needed (X0) | |
+| Date | 2026-11-20 |
+| Mac model / VM | VirtualMac2,1 (macOS VM, Parallels) |
+| macOS version | 27.2.1 (26B131) |
+| Signing identity | Apple Development (Team E89Q3796E9) |
+| Compile fixes needed (X0) | none. It compiled on the first try, with only deprecation warnings (SecKeychain/SecACL APIs). The app was installed with a non-sudo `ditto`, so the bundle is owned by the user, not root. |
 
 ## 1. Registration
 
 | Test | Result | notes |
 |---|---|---|
-| X1 info | | |
-| X2 register → requiresApproval, Settings opens | | name and icon shown: |
-| X3 enabled after approval | | |
-| X4 launchctl print | | |
-| X5 works from Terminal / needs `open` | | |
+| X1 info | ✅ | identifier `dev.farrier.spike.app`, team E89Q3796E9. `daemonStatus` before registering: **`notFound`** (not `notRegistered`) |
+| X2 register → requiresApproval, Settings opens | ✅ | `register()` **throws** `SMAppServiceErrorDomain` 1 "Operation not permitted" while the status becomes `requiresApproval`. That's the API's way of saying "needs approval", so Farrier must treat it as such, not as a failure. Settings opened on Login Items. |
+| X3 enabled after approval | ✅ | |
+| X4 launchctl print | ✅ | `managed_by = com.apple.xpc.ServiceManagement`, `state = not running` (on demand). **launchd attaches a launch constraint (LWCR):** signing-identifier `dev.farrier.spike.helper` + team-identifier `E89Q3796E9`, validation-category 3. So a modified or swapped helper won't launch. |
+| X5 works from Terminal / needs `open` | ✅ from Terminal | no `open` needed |
 
-Screenshot of the Login Items entry:
+What the user sees (X2):
+- **Notification:** *"App Background Activity — 'FarrierSpike' can run in the background for all users. Do you want to allow…"*,
+  with Options → Allow / Don't Allow.
+- **System Settings → General → Login Items:** under **Background App Activity**, the entry **FarrierSpike** (the bundle
+  name) has a **generic icon**, says "Not running in background", and is **off** until approved.
+- For the product: ship a real app icon and a clear bundle name, because that's all the user sees when deciding.
 
 ## 2. XPC and pinning
 
 | Test | Result | notes |
 |---|---|---|
-| X6 ping (euid 0, identifier) | | |
-| X7 ad hoc client rejected | | error domain/code: |
-| X8 same team, other identifier rejected | | |
-| X9 client rejects unexpected helper | | |
-| X10 same binary outside the bundle | | |
+| X6 ping (euid 0, identifier) | ✅ | `helperEuid: 0`, `helperIdentifier: dev.farrier.spike.helper`. The log shows "starting", "right created (authenticate-admin)", and the client requirement. |
+| X7 ad hoc client rejected | not run yet | first attempt used the wrong path (`$PWD` was `~`) |
+| X8 same team, other identifier rejected | not run yet | same |
+| X9 client rejects unexpected helper | ✅ | `NSCocoaErrorDomain` **4102** "Couldn't communicate with a helper application." The helper log shows the connection, then "invalidated". |
+| X10 same binary outside the bundle | **killed** | `cp $F /tmp/fs-copy && /tmp/fs-copy ping` → `zsh: killed`. The main executable's signature also covers the bundle (Info.plist), so a copy outside it is invalid, and macOS kills it on launch. Good for security. It means the CLI must run **from inside the bundle**. |
+| X10b symlink to the binary in the bundle | | the Homebrew-style `farrier` command |
 
 ## 3. Console-session check
 

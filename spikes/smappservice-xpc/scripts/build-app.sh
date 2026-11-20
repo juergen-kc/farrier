@@ -49,4 +49,4 @@ done
 
 echo
 echo "Next: install with"
-echo "  sudo rm -rf /Applications/FarrierSpike.app && ditto $APP /Applications/FarrierSpike.app"
+echo "  sudo rm -rf /Applications/FarrierSpike.app && sudo ditto $APP /Applications/FarrierSpike.app && sudo chown -R root:wheel /Applications/FarrierSpike.app"

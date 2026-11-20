@@ -22,10 +22,11 @@ export SIGN_IDENTITY="Apple Development: Jurgen Klaaben (U366MAP9SE)"
 ```
 
 ```bash
-sudo rm -rf /Applications/FarrierSpike.app && sudo ditto out/FarrierSpike.app /Applications/FarrierSpike.app
+sudo rm -rf /Applications/FarrierSpike.app && sudo ditto out/FarrierSpike.app /Applications/FarrierSpike.app && sudo chown -R root:wheel /Applications/FarrierSpike.app
 ```
 
 ```bash
+cd ~/Downloads/farrier/farrier/spikes/smappservice-xpc   # A and O below depend on this directory
 F=/Applications/FarrierSpike.app/Contents/MacOS/farrier-spike; A=$PWD/out/attacker-adhoc; O=$PWD/out/attacker-other-id
 ```
 
@@ -62,7 +63,9 @@ open -W --stdout /tmp/fs-out.txt --stderr /tmp/fs-err.txt /Applications/FarrierS
 - [ ] **X9 client pins the helper:** `$F ping --expect-helper-id dev.farrier.wrong`. Expect **rejection**, because the
       client refuses a helper that doesn't match. Record the error.
 - [ ] **X10 client outside the bundle:** `cp $F /tmp/fs-copy && /tmp/fs-copy ping`. It's the same signature, just a
-      different location. Record whether it's accepted. Expected: accepted, since the requirement doesn't check the path.
+      different location. (First VM run: **killed** on launch. The signature also covers the bundle.)
+- [ ] **X10b symlink:** `ln -sf $F /tmp/farrier && /tmp/farrier info && /tmp/farrier ping`. This is how a Homebrew
+      `farrier` command would work. Expect it to work, with `bundlePath` `/Applications/FarrierSpike.app`.
 
 ## 3. Console-session check
 
