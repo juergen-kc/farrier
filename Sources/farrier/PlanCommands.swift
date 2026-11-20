@@ -61,8 +61,8 @@ struct PlanPosture: ParsableCommand {
     @Option(name: .customLong("rule"), help: "Only these rule ids (repeatable). Default: every fixable failure.")
     var ruleIDs: [String] = []
 
-    @Option(name: .customLong("rules"), help: "Rule pack files or directories.")
-    var rulePaths: [String] = ["rules"]
+    @Option(name: .customLong("rules"), help: "Rule pack files or directories. Default: the packs bundled with Farrier.app, or ./rules.")
+    var rulePaths: [String] = []
 
     @Option(help: "JSON file with facts to use instead of collecting (for testing; such a plan only applies if the facts match this Mac).")
     var facts: String?
@@ -71,7 +71,7 @@ struct PlanPosture: ParsableCommand {
     var json = false
 
     func run() throws {
-        let (packs, loadIssues) = RuleLinter.loadPacks(at: rulePaths, source: .bundled)
+        let (packs, loadIssues) = RuleLinter.loadPacks(at: rulePaths.isEmpty ? defaultRulePaths() : rulePaths, source: .bundled)
         let errors = (loadIssues + RuleLinter.lint(packs)).filter { $0.level == .error }
         guard errors.isEmpty else {
             for e in errors { note("\(e)") }
