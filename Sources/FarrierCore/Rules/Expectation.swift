@@ -113,7 +113,13 @@ public indirect enum Expectation: Sendable, Hashable {
             }
             return Outcome.combineAll(outcomes)
         case .at(let path, let inner):
-            switch inner.evaluate(value.value(at: path)) {
+            let nested = value.value(at: path)
+            // A key that isn't there is "can't tell", not "fails": Apple often omits a setting and uses its default.
+            // Only an explicit `exists` check decides on absence.
+            if nested == nil {
+                if case .exists = inner {} else { return .unknown("\(path) is not set") }
+            }
+            switch inner.evaluate(nested) {
             case .pass: return .pass
             case .fail(let r): return .fail("\(path): \(r)")
             case .unknown(let r): return .unknown("\(path): \(r)")

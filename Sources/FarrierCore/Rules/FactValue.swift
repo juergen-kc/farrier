@@ -89,6 +89,9 @@ extension FactValue: Codable {
         if let s = try? c.decode(String.self) { self = .string(s); return }
         if let a = try? c.decode([FactValue].self) { self = .array(a); return }
         if let o = try? c.decode([String: FactValue].self) { self = .object(o); return }
+        // Property lists only (JSON never gets here: numbers and strings are caught above).
+        if let date = try? c.decode(Date.self) { self = .string(ISO8601DateFormatter().string(from: date)); return }
+        if let data = try? c.decode(Data.self) { self = .string(data.base64EncodedString()); return }
         throw DecodingError.dataCorruptedError(in: c, debugDescription: "unsupported fact value")
     }
 

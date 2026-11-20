@@ -28,6 +28,8 @@ public enum CoreFacts {
     public static let profilePayloadTypes = "mdm.payloadTypes"
     /// Active Declarative Device Management configuration types (list of strings).
     public static let declarationTypes = "mdm.declarationTypes"
+    /// MDM enrollment state: { dep, mdm, userApproved }.
+    public static let enrollment = "mdm.enrollment"
 }
 
 public struct Finding: Sendable, Codable, Hashable {
@@ -41,6 +43,9 @@ public struct Finding: Sendable, Codable, Hashable {
     /// True when an MDM profile or declaration enforces this setting. Farrier then reports it but never changes it.
     public let managed: Bool
     public let managedBy: String?
+    /// True when the Mac is MDM-enrolled but the installed profiles couldn't be read (that needs the helper).
+    /// Then Farrier can't rule out that MDM owns the setting, so nothing is fixable.
+    public let managementUnknown: Bool
     /// Can Farrier fix it locally? Only if it fails, remediation is automatic, and it isn't MDM-managed.
     public let fixable: Bool
     public let guidance: String?
@@ -64,8 +69,17 @@ public struct PostureReport: Sendable, Codable {
 
 public enum PostureEngine {
     public static func evaluate(_ packs: [RulePack], facts: FactStore) -> PostureReport {
-        let payloads = Set(facts.value(for: CoreFacts.profilePayloadTypes)?.array?.compactMap(\.string) ?? [])
-        let declarations = Set(facts.value(for: CoreFacts.declarationTypes)?.array?.compactMap(\.string) ?? [])
+        let payloadFact = facts.value(for: CoreFacts.profilePayloadTypes)
+        let declarationFact = facts.value(for: CoreFacts.declarationTypes)
+        let payloads = Set(payloadFact?.array?.compactMap(\.string) ?? [])
+        let declarations = Set(declarationFact?.array?.compactMap(\.string) ?? [])
+        // Enrolled (or enrollment unknown) and the managed settings weren't collected → can't rule MDM out.
+        let enrolled: Bool? = {
+            guard let e = facts.value(for: CoreFacts.enrollment) else { return nil }
+            if case .bool(let mdm) = e.value(at: "mdm") ?? .null { return mdm }
+            return nil
+        }()
+        let managementUnknown = (payloadFact == nil || declarationFact == nil) && enrolled != false
 
         var findings: [Finding] = []
         for pack in packs {
@@ -92,7 +106,8 @@ public enum PostureEngine {
                 findings.append(Finding(
                     ruleID: rule.id, title: rule.title, severity: rule.severity, status: status, reason: reason,
                     managed: managedBy != nil, managedBy: managedBy,
-                    fixable: status == .fail && rule.remediation.automatic && managedBy == nil,
+                    managementUnknown: managedBy == nil && managementUnknown,
+                    fixable: status == .fail && rule.remediation.automatic && managedBy == nil && !managementUnknown,
                     guidance: status == .pass ? nil : rule.remediation.guidance,
                     mappings: rule.mappings
                 ))

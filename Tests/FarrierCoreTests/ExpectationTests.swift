@@ -56,9 +56,15 @@ struct ExpectationTests {
             """)
         let good = FactValue.object(["CriticalUpdateInstall": .bool(true), "ConfigDataInstall": .bool(true)])
         let bad = FactValue.object(["CriticalUpdateInstall": .bool(true)])
+        let wrong = FactValue.object(["CriticalUpdateInstall": .bool(true), "ConfigDataInstall": .bool(false)])
         #expect(e.evaluate(good) == .pass)
-        guard case .fail(let reason) = e.evaluate(bad) else { Issue.record("missing key should fail"); return }
+        guard case .fail(let reason) = e.evaluate(wrong) else { Issue.record("false should fail"); return }
         #expect(reason.contains("ConfigDataInstall"))
+        // A key that isn't set is "can't tell" (Apple uses its default), not a failure.
+        guard case .unknown(let why) = e.evaluate(bad) else { Issue.record("missing key should be unknown"); return }
+        #expect(why.contains("ConfigDataInstall"))
+        // …unless the check is explicitly about absence.
+        #expect(try expect("{ path: Foo, exists: false }").evaluate(good) == .pass)
     }
 
     @Test func eachChecksEveryItemAndPassesOnEmpty() throws {
