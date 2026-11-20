@@ -30,7 +30,7 @@ final class HelperService: NSObject, HelperProtocol {
     func ping(reply: @escaping (Data) -> Void) {
         reply(encodeJSON([
             "ok": true,
-            "helperPid": Int(getpid()),
+            "helperPID": Int(getpid()),  // renamed from helperPid for the update test (X29)
             "helperEuid": Int(geteuid()),
             "helperIdentifier": me.identifier ?? "(none)",
             "helperTeamID": me.teamID ?? "(none)",

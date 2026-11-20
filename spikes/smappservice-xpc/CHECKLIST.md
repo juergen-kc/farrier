@@ -122,9 +122,9 @@ Re-enroll with `$F enroll` if X19 left it unenrolled.
 
 ## 7. Updates
 
-- [ ] **X29 app update:** change a string in the client and the helper (for example the `0.0.2` version in
-      `support/Info.plist`, plus `"helperPid"` to `"helperPID"` in `HelperService.swift`), rebuild, and reinstall
-      with the same `ditto` command. Then:
+- [ ] **X29 app update:** the commit after the first VM run already changes the client (the key-acl fix), the helper
+      (`helperPid` → `helperPID`) and the version (0.0.2 → 0.0.3). So `git pull`, rebuild, and reinstall with the same
+      `ditto` command. Then:
   - [ ] `$F status`. Is it still `enabled`, or does it need registering or approving again?
   - [ ] `$F ping`. Does the **new** helper answer? Check that `helperPID` (the new key) appears, and the log
         shows a new "starting" line. If the old helper is still running, record that. Try

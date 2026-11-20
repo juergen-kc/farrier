@@ -53,22 +53,22 @@ What the user sees (X2):
 
 | Test | Result | notes |
 |---|---|---|
-| X15 key-create, no prompt | | |
-| X16 key-acl integrityOK | | |
-| X17 enroll: admin dialog | | dialog names: ; loading the key prompted? |
-| X18 key file root:wheel 0644 | | |
-| X19 cancel → refused | | authStatus: |
+| X15 key-create, no prompt | ✅ | |
+| X16 key-acl integrityOK | ✅ ACL / ❌ check bug | The access list is exactly as intended: Decrypt/Derive/Export/MAC/**Sign** trust only `/Applications/FarrierSpike.app`; Encrypt, Integrity and PartitionID: any app; **ChangeACL: no app** (`[]`). The check reported `integrityOK: false` because the keychain records the **bundle path**, while the check compared against the executable path. Fixed in the next commit (both paths count as self). |
+| X17 enroll: admin dialog | ✅ | Dialog: **"enroll a Farrier approval key — Enter your password to continue with 'FarrierSpike'."** It's credited to the **client app** (not the helper), appears in the user's session, and the user name is prefilled. The text is the right's `default-prompt`. A second enroll asked again (no silent credential reuse). Fingerprints match. No separate Touch ID or password prompt for loading the key. |
+| X18 key file root:wheel 0644 | ✅ (group admin) | `-rw-r--r-- root admin`. The group is inherited from `/Library/Application Support`; the product should set `root:wheel` explicitly. |
+| X19 cancel → refused | ✅ | `authStatus: -60006` (errAuthorizationCanceled) |
 | X20 SSH enroll refused before dialog | ✅ (earlier) | didn't reach the helper: keychain read failed with -25300 (item not found, since the key wasn't created yet). With the key present, the keychain blocks SSH with -25308 (first spike, C7). Nothing appeared on screen. |
-| X21 authorizationdb rule | | |
+| X21 authorizationdb rule | ✅ | `rule: authenticate-admin`, `default-prompt` as above. macOS also stored the **creator's identity**: `identifier dev.farrier.spike.helper`, plus a requirement tied to the Apple Development certificate (`leaf[subject.CN]`). The right persists in the database until it's removed (see clean up). |
 
 ## 5. Approval round trip
 
 | Test | Result | notes |
 |---|---|---|
-| X22 approve | | |
-| X23 replay refused | | |
-| X24 tamper refused | | |
-| X25 expiry refused | | expired / unknown nonce: |
+| X22 approve | ✅ | begin (nonce, ttl 60), prompt, `approved: true`. Helper log: "approved plan 310d1c39…" |
+| X23 replay refused | ✅ | the second submission was refused: "unknown or already used nonce (replay?)" |
+| X24 tamper refused | ✅ | "invalid signature" |
+| X25 expiry refused | ✅ | **"approval expired"**. The helper stayed alive for the 65 s; the nonce was still known. |
 | X26 SSH approve refused | ✅ | the helper refused at `beginApproval`: "caller is not in the console session" (bits 0x5020, remote). Refused before any signing, so no prompt is possible. |
 | X27 attacker rejected | | |
 

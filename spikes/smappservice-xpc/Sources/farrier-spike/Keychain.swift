@@ -90,7 +90,8 @@ enum Keychain {
         st = SecAccessCopyACLList(access, &list)
         guard st == errSecSuccess, let list else { throw OSStatusError(st, "SecAccessCopyACLList") }
 
-        let selfPath = Bundle.main.executablePath ?? ""
+        // The keychain records the trusted app as the BUNDLE path (seen in the first VM run), so both count as "self".
+        let selfPaths: Set<String> = [Bundle.main.executablePath ?? "", Bundle.main.bundlePath]
         var entries: [[String: Any]] = []
         var foreign: [String] = []
         for aclObj in (list as NSArray) {
@@ -105,14 +106,14 @@ enum Keychain {
                 let paths = (apps as NSArray).map { appPath($0 as! SecTrustedApplication) }  // swiftlint:disable:this force_cast
                 entry["trustedApps"] = paths
                 if auths.contains(where: { $0.contains("Decrypt") || $0.contains("Any") }) {
-                    foreign += paths.filter { $0 != selfPath && !$0.hasPrefix("group://") }
+                    foreign += paths.filter { !selfPaths.contains($0) && !$0.hasPrefix("group://") }
                 }
             } else {
                 entry["trustedApps"] = "ANY application"
             }
             entries.append(entry)
         }
-        return ["ok": true, "self": selfPath, "foreignTrustedApps": foreign, "integrityOK": foreign.isEmpty, "entries": entries]
+        return ["ok": true, "self": selfPaths.sorted(), "foreignTrustedApps": foreign, "integrityOK": foreign.isEmpty, "entries": entries]
     }
 
     private static func appPath(_ app: SecTrustedApplication) -> String {
