@@ -4,8 +4,9 @@ import Testing
 
 @Suite("Expectation")
 struct ExpectationTests {
-    func expect(_ yaml: String) throws -> Expectation {
-        try Expectation.parse(FactValue.parseYAML(yaml))
+    // Qualified: Swift Testing also has a type named `Expectation`.
+    func expect(_ yaml: String) throws -> FarrierCore.Expectation {
+        try FarrierCore.Expectation.parse(FactValue.parseYAML(yaml))
     }
 
     @Test func equalsTreatsIntAndDoubleAlike() throws {
