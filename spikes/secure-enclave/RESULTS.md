@@ -57,7 +57,7 @@ Prompt (V2, VM, password fallback). The icon is the generic "exec" icon with a l
 | E2 policies (userPresence / biometryAny / biometryCurrentSet / none) | partial | `none` control on the VM: no prompt, `secondsInSign: 0` (324-byte blob, against 427 for userPresence). Biometry policies need Touch ID. |
 | E3 enrollment change | | |
 | E4 locked screen | ✅ signed after unlock (26.3 s) | no prompt on the lock screen; it appeared after unlock |
-| E5 SSH session | | **prompt on console?** |
+| E5 SSH session | ⚠️ **signed over SSH** | `sshSession: true`, `ok: true`, 5.56 s: a prompt was shown and approved (presumably in the VM's console window; to be confirmed). See F4. |
 | E6 started by Claude Code | | parent: |
 | E7 root signs with user key | ❌ as expected | the prompt appeared, juergen's password was not accepted, and the result was LAError -2. Prompted user: ? |
 | E8 other user | | |
@@ -82,7 +82,7 @@ Prompt (V2, VM, password fallback). The icon is the generic "exec" icon with a l
 | C4 `security` tool gets a dialog | ✅ | | | Deny: no output |
 | C5 V2b (same team, other identifier) gets a dialog | ✅ | – | – | -128 on Deny, so trust is per binary, not per team |
 | C6 Allow (once), then user-presence prompt, then signs | ✅ | | | keychain read 5.77 s (login keychain password), then signing 3.83 s: two gates |
-| C7 over SSH | | | | |
+| C7 over SSH | ✅? | | | `-25308` (errSecInteractionNotAllowed) on the keychain read, before any prompt. **Inconclusive:** item `t7` had already been deleted. Re-run pending. |
 | C9 still trusted after a code change and rebuild (updates) | ✅ | | | CDHash changed (08d9461b… to 50303002…); no keychain dialog, only the user-presence prompt (10.52 s). An earlier run with only a comment changed was inconclusive, because the binary may not have changed. |
 
 Keychain dialog (C3, V2 on the VM). C4 and C5 look the same, apart from the name:
@@ -118,6 +118,13 @@ So:
 - Residual risk: a user who clicks "Always Allow" permanently adds the attacker's binary to the trust list.
   Mitigation idea: Farrier checks the item's access list at startup (`SecKeychainItemCopyAccess`) and warns,
   or recreates the key, if anything other than itself is trusted.
+
+**F4: An approval prompt can be triggered from an SSH session (Approach A).** Over SSH, `a-sign` reached
+user-presence authentication, and the prompt appeared on the console session (to be confirmed). The person at the
+desk can't tell that the request came from a remote shell. Approach C appears to block this, because the
+keychain read fails with `-25308` in an SSH session (re-run pending). Independent of the approach, the helper
+should also refuse approvals that don't come from the console session: it can check the caller's login
+session for that.
 
 **F3 (resolved on V2):** updates keep access. After a real code change (new CDHash), the access list still matched, so it matches the signing identity (designated requirement), not the exact binary. To be repeated with Developer ID (V3/V5).
 
