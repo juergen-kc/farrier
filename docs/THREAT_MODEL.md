@@ -47,7 +47,10 @@
   the agent supplied.
 - T2 changes are reversible from quarantine.
 - Tool results label untrusted fields (file names, log text) as data, and MCP server instructions tell
-  clients so. This is defense in depth only. We don't rely on it.
+  clients so. Claude Code does pass the instructions to the model, but this is defense in depth only. We don't
+  rely on it.
+- We also don't rely on the client asking the user before a destructive tool call. In auto mode, Claude Code
+  didn't ask (MCP SDK spike). Only the on-device approval counts.
 
 ### T-2. Another process abuses the helper (local privilege escalation)
 - The helper enforces a code-signing requirement (Team ID + exact identifier) on every connection. The client
@@ -55,6 +58,13 @@
   both rejected.
 - launchd attaches a launch constraint (identifier + Team ID) to the helper's job, so a modified or swapped
   helper binary won't launch. `Farrier.app` is installed owned by root.
+- **The helper holds Full Disk Access** (granted to `Farrier.app`), so it's the one process that can read
+  privacy-protected data. That makes it the most valuable target. Therefore:
+  - `readPrivileged` returns **derived facts only** (for example "these 12 apps have Accessibility access"), never
+    raw file contents.
+  - It takes fact identifiers, never paths.
+  - It resolves user locations for the console user itself.
+  - It applies the console-session check to T1 reads as well, not just to approvals.
 - The helper has a fixed verb set. Payloads are typed and versioned, and unknown fields are rejected.
 - The helper **re-derives** everything. It re-matches each item against the rule's allowed roots, resolves
   paths with `O_NOFOLLOW`, checks the owner, refuses hard-linked files with a link count above 1, and
@@ -140,6 +150,8 @@ hostnames, serial numbers, Wi-Fi network names, app lists and file paths. Mitiga
   UUIDs, MAC addresses, SSIDs, usernames inside paths, and email-like strings with stable
   placeholders.
 - Tools return summaries first and details on request.
+- The helper can read Mail, Messages and Safari data (it holds Full Disk Access), but **Farrier never returns
+  content from them**. At most, a check reports metadata, such as whether a database exists or how large it is.
 
 ## Non-goals
 
@@ -154,4 +166,6 @@ hostnames, serial numbers, Wi-Fi network names, app lists and file paths. Mitiga
 - Helper updates: confirm the version handshake and idle exit really replace a running old helper (the spike
   showed that an update alone doesn't).
 - Should the helper refuse to run while the user session is locked or fast-user-switched?
+- Other MCP clients (Claude Desktop, others): process chain, session check, timeouts and confirmation behaviour.
+  So far, only Claude Code has been tested.
 - What is the JumpCloud write-back scope, and what can a device actually modify about itself?

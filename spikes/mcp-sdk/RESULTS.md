@@ -98,10 +98,10 @@ M14 user-folder dialog names:
 
 ## Conclusions
 
-- SDK suitable for v0.1: [ ] yes / [ ] with workarounds / [ ] no
-- Protocol version gap (2025-11-25 vs 2026-07-28): impact:
-- Annotations honoured by Claude Code:
+- SDK suitable for v0.1: [ ] yes / [x] with workarounds (let in-flight requests finish at EOF; follow releases for 2026-07-28) / [ ] no
+- Protocol version gap (2025-11-25 vs 2026-07-28): impact: **none with Claude Code 2.1.329**, which itself requests 2025-11-25.
+- Annotations honoured by Claude Code: shown in `/mcp` (read-only / destructive, annotation title). Confirmation before a destructive call depends on the permission mode: **none in auto mode**, asked in default mode.
 - Privileged reads must go through: [ ] the CLI's own FDA / [x] **the helper** (FDA granted to the app bundle applies to the helper only)
-- Long operations:
+- Long operations: moved to the background after 120 s and completed (≤ 5 min tested); progress is sent but doesn't extend the 120 s limit; the Tasks extension isn't needed for Claude Code.
 
-ARCHITECTURE.md and THREAT_MODEL.md updated: [ ]
+ARCHITECTURE.md and THREAT_MODEL.md updated: [x] (also TOOLS.md, ROADMAP.md, README.md)

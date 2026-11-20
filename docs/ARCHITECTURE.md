@@ -58,8 +58,13 @@ fixture tests for every supported macOS version.
 
 - Built with `swift-argument-parser`.
 - Every command supports `--json`, whose output matches the MCP tool's `structuredContent` schema.
-- `farrier mcp` starts the stdio MCP server. It runs inside the same signed binary, so Full Disk Access
-  (FDA) and other TCC grants apply to one stable identity, not to a terminal or interpreter.
+- `farrier mcp` starts the stdio MCP server, inside the same signed binary as the CLI.
+- **The CLI and the MCP server never rely on privacy (TCC) grants.** macOS attributes their file access to the
+  app at the top of their process chain: Terminal, iTerm, Claude Desktop, and so on. So a Full Disk Access grant to
+  Farrier doesn't apply to them, and the terminal's grant (if any) is an accident of how the user launched them.
+  Everything TCC-protected is read **through the helper** (`readPrivileged`, tier T1). Verified in the
+  [MCP SDK spike](../spikes/mcp-sdk/RESULTS.md): with FDA granted only to the app, the CLI and the MCP server were
+  denied while the helper could read; with FDA only on Terminal, it was the other way round.
 - **The binary only runs from inside `Farrier.app`.** Its signature also covers the bundle (`Info.plist`), so a
   copy taken out of the bundle is killed at launch. That's verified, and it's good for security.
 - **The `farrier` command on `PATH` is a wrapper script**, not a symlink:
@@ -70,15 +75,41 @@ fixture tests for every supported macOS version.
 
 ### `farrier mcp` (MCP server)
 
-- Built on the official Swift MCP SDK. **SPIKE:** confirm SDK support for the 2026-07-28 spec
-  and the Tasks extension.
+> Verified in the [MCP SDK spike](../spikes/mcp-sdk/RESULTS.md) with Claude Code 2.1.329 on a macOS VM, unless
+> marked otherwise.
+
+- Built on the official Swift MCP SDK (`modelcontextprotocol/swift-sdk`), pinned to an exact version (0.12.1 in
+  the spike). It needs swift-tools 6.1 or later and adds about 5 MB to the binary, including swift-nio and
+  swift-system.
+- **Protocol version:** SDK 0.12.1 supports versions up to `2025-11-25`. Claude Code itself requests
+  `2025-11-25`, so in practice there's no gap. A client asking for a newer version gets `2025-11-25` back. Follow SDK
+  releases for `2026-07-28`.
+- **What Claude Code does with our metadata:**
+  - `/mcp` labels each tool **read-only** or **destructive** from the annotations, and shows the **annotation
+    `title`**, not the tool `title`. So every tool sets an annotation title.
+  - Server `instructions` reach the model, which quoted them verbatim.
+  - Resources are offered via `@`. Prompts become slash commands (`/farrier:<prompt>`).
+  - The client advertised `roots` and `elicitation`, but not `sampling` or `tasks`.
 - It is a thin layer: each tool calls one FarrierCore function and returns its result as
   structured content with an output schema.
 - Tool annotations come from the operation's tier (see [TOOLS.md](TOOLS.md)).
-- Long operations (full-disk scans, updates, sysdiagnose) use the **Tasks** extension, with a
-  synchronous fallback when the client doesn't support it.
+- **Long operations** (full-disk scans, updates, sysdiagnose):
+  - They send **progress notifications** whenever the client provides a `progressToken`. Claude Code always does.
+  - The SDK has no Tasks extension, and Claude Code doesn't need it. After **120 s**, Claude Code moves a tool call
+    to the background and delivers the result as a notification when it completes. Verified up to 5 min.
+  - Progress doesn't extend the 120 s foreground limit.
+  - Other clients may time out instead. So operations that can run much longer than about 5 min get a start/status
+    pair of tools as a fallback.
 - Exposes **resources** (`farrier://posture/latest`, `farrier://snapshot/{id}`,
   `farrier://journal/recent`) and **prompts** (debugging runbooks).
+- **Stdout belongs to the protocol.** Diagnostics go to stderr or a log file.
+- **On end of input, the server lets in-flight requests finish** before exiting. In the spike, the SDK's loop ended
+  at EOF while handlers were still running, and replies were lost. Real clients keep stdin open, so the impact is
+  low, but it's an easy fix.
+- **Client-side confirmation is not a safeguard.** In its default permission mode, Claude Code asks before calling a
+  tool. In **auto mode**, which is common, it called the destructive tool without asking. The only gate Farrier relies
+  on is its own on-device approval, which worked from the agent in both modes. A cancel came back as a clear error,
+  and the agent didn't retry.
 - There is no `apply` path that bypasses on-device approval. Approval is a Touch ID or password prompt for
   the Secure Enclave approval key (see [Approve](#plan-approve-apply)), not MCP elicitation. Elicitation is
   answered by the AI client, which is the thing we don't fully trust.
@@ -115,7 +146,7 @@ fixture tests for every supported macOS version.
 
   | Verb | Purpose |
   |---|---|
-  | `readPrivileged(fact)` | Read root-only facts: system TCC.db, `/Library` launchd plists with full detail, firewall state, JumpCloud agent config |
+  | `readPrivileged(fact)` | Read **root-only or TCC-protected** facts: system and user TCC.db, `/Library` launchd plists with full detail, firewall state, JumpCloud agent config, Safari/Mail metadata where a check needs it. Fixed facts only, never an arbitrary path. Any user-specific location is resolved for the **console user** by the helper itself, never from a path the client sends. |
   | `quarantine(items, planProof)` | Move root-owned items into root quarantine |
   | `restore(planID)` / `expireQuarantine()` | Restore items, or expire them after the retention window |
   | `deleteLocalSnapshot(name, planProof)` | Delete an APFS local snapshot (irreversible, so it is T3) |
@@ -146,8 +177,8 @@ and logging.
 
 | Tier | Meaning | Example | Approval |
 |---|---|---|---|
-| **T0** read | Read user-accessible state | posture (unprivileged part), disk usage | none |
-| **T1** privileged read | Read via the helper | system TCC.db, root launchd details | none (helper checks the client signature) |
+| **T0** read | Read user-accessible state that isn't TCC-protected | posture (unprivileged part), disk usage | none |
+| **T1** privileged read | Read via the helper: anything root-only **or TCC-protected** (even user-owned) | system TCC.db, root launchd details, user TCC.db | none (helper checks the client signature and the console session) |
 | **T2** reversible change | Can be undone from quarantine or journal | move caches to quarantine | plan + confirm (`--yes` allowed for allowlisted rules) |
 | **T3** destructive | Cannot be undone | delete APFS snapshot, empty quarantine | plan + **on-device auth** |
 | **T4** system config | Changes system security or config | enable firewall, change update policy | plan + **on-device auth** |
@@ -207,6 +238,10 @@ The same keychain also refuses SSH sessions (finding F4).
 - The helper stores the public key at `/Library/Application Support/Farrier/approval-key.pub`. It sets
   `root:wheel` and `0644` **explicitly**: in the spike, the group was inherited as `admin`. Changing the key later
   means re-enrolling, which is journaled and needs admin authorization again.
+- **Full Disk Access for the helper.** Setup asks the user to grant Full Disk Access to `Farrier.app`. That grant
+  covers the helper, the LaunchDaemon in the bundle (verified). Farrier detects whether the grant is there by having
+  the helper try a known protected read, opens System Settings → Privacy & Security → Full Disk Access when it's
+  missing, and reports TCC-dependent checks as "unknown (no Full Disk Access)" rather than as passed or failed.
 - The authorization right stays in the system database until removed, so **uninstall must remove it**
   (`security authorizationdb remove`). The database also records the identity of the code that created the right.
 

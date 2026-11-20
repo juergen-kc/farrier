@@ -80,7 +80,9 @@ claude mcp add farrier -- farrier mcp
   and the privileged helper. Install with Homebrew (`brew install --cask farrier`, which also adds the
   `farrier` command) or download the bundle from GitHub Releases.
 - On first setup, macOS asks you to allow Farrier's background helper ("App Background Activity"), and Farrier
-  asks for an admin password once, to enroll its approval key.
+  asks for an admin password once, to enroll its approval key. For posture checks that touch privacy-protected
+  data, you also give Farrier **Full Disk Access** once. Only its root helper uses that access, never the
+  terminal or AI client it runs in.
 
 ## Documentation
 

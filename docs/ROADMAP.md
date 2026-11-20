@@ -22,9 +22,11 @@ needs to be retrofitted.
       failed integrity check must rotate the key, the `farrier` command must be a wrapper (not a symlink), and the
       app needs a real icon and name. Still needed: Developer ID on a physical Mac.
 - [ ] Swift MCP SDK: stdio, output schemas, annotations, and Tasks extension support for the 2026-07-28 spec.
-      Code and test checklist: [spikes/mcp-sdk](../spikes/mcp-sdk/). **Known from the source:** SDK 0.12.1 supports
-      protocol versions up to 2025-11-25 only and has no Tasks extension. The spike also tests TCC attribution
-      (whose Full Disk Access applies when an AI client starts `farrier mcp`) and agent-triggered approvals.
+      Code and test checklist: [spikes/mcp-sdk](../spikes/mcp-sdk/).
+      **Status:** passed with Claude Code on a macOS VM. SDK 0.12.1 is usable for v0.1: Claude Code also speaks
+      `2025-11-25`, and long calls move to the background after 120 s, so the missing Tasks extension doesn't matter.
+      **Key finding:** a Full Disk Access grant to the app covers only the helper, not the CLI or MCP server, so all
+      protected reads go through the helper. Not yet tested: Claude Desktop.
 - [ ] Signing and notarization pipeline in GitHub Actions, plus a Homebrew cask.
 - [ ] Fixture capture script for Apple CLI outputs on macOS 14, 15, and 26.
 
@@ -35,6 +37,8 @@ needs to be retrofitted.
   console-session check
 - Packaging: a root-owned `Farrier.app` with an icon; the Homebrew cask installs a `farrier` wrapper script;
   uninstall removes the LaunchDaemon, the enrolled key and the authorization right
+- Full Disk Access onboarding: detect via the helper, open the right Settings pane, and report "unknown" without it
+- MCP server: progress notifications, annotation titles, and letting in-flight requests finish at end of input
 - `farrier-helper` with `readPrivileged` and `setSystemSetting` (small allowlist: firewall,
   stealth mode, automatic update settings)
 - Plan, approve and apply, with the journal
