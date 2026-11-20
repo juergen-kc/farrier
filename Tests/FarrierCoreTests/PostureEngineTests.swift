@@ -38,6 +38,31 @@ struct PostureEngineTests {
         #expect(try finding(report, "posture.core.gatekeeper").status == .unknown)
     }
 
+    @Test func managedRulesStayUnfixableWithoutValidInventories() throws {
+        // PR #2 review: missing or malformed MDM inventories must not be treated as "nothing is managed".
+        let packs = try packs()
+        for facts: [String: FactValue] in [
+            ["firewall.globalState": .string("off")],                                        // missing
+            ["firewall.globalState": .string("off"), "mdm.payloadTypes": .string("oops"),
+             "mdm.declarationTypes": .array([])],                                             // not a list
+            ["firewall.globalState": .string("off"), "mdm.payloadTypes": .array([.int(1)]),
+             "mdm.declarationTypes": .array([])],                                             // not strings
+        ] {
+            let report = PostureEngine.evaluate(packs, facts: StaticFactStore(facts))
+            let firewall = try finding(report, "posture.core.firewall")
+            #expect(firewall.status == .fail)
+            #expect(firewall.managementUnknown)
+            #expect(!firewall.fixable)
+        }
+        // With valid, empty inventories the firewall is fixable.
+        let report = PostureEngine.evaluate(packs, facts: StaticFactStore([
+            "firewall.globalState": .string("off"), "mdm.payloadTypes": .array([]), "mdm.declarationTypes": .array([]),
+        ]))
+        let firewall = try finding(report, "posture.core.firewall")
+        #expect(!firewall.managementUnknown)
+        #expect(firewall.fixable)
+    }
+
     @Test func failuresComeFirstBySeverity() throws {
         let data = try Data(contentsOf: repoRoot.appendingPathComponent("examples/facts-sample.json"))
         let report = PostureEngine.evaluate(try packs(), facts: try StaticFactStore(json: data))

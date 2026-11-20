@@ -78,6 +78,29 @@ struct ExpectationTests {
         if case .fail = e.evaluate(.string("c")) {} else { Issue.record("c should fail") }
     }
 
+    @Test func combinatorsSeeAMissingValue() throws {
+        // PR #2 review: `any` must evaluate an `exists: false` branch against a missing value.
+        let e = try expect("{ path: optional, any: [ { exists: false }, { equals: expected } ] }")
+        #expect(e.evaluate(.object([:])) == .pass)
+        #expect(e.evaluate(.object(["optional": .string("expected")])) == .pass)
+        if case .fail = e.evaluate(.object(["optional": .string("other")])) {} else { Issue.record("other should fail") }
+    }
+
+    @Test func matchesRejectsATrailingNewline() throws {
+        // PR #2 review: `$` would match before a final newline; the match must cover the whole string.
+        let e = try expect("{ matches: enabled }")
+        #expect(e.evaluate(.string("enabled")) == .pass)
+        if case .fail = e.evaluate(.string("enabled\n")) {} else { Issue.record("trailing newline must fail") }
+    }
+
+    @Test func largeIntegersCompareExactly() {
+        // PR #2 review: 2^53 and 2^53 + 1 are equal as Doubles, but not as integers.
+        #expect(!FactValue.int(9_007_199_254_740_992).matches(.int(9_007_199_254_740_993)))
+        #expect(FactValue.int(3).matches(.double(3.0)))
+        #expect(!FactValue.int(3).matches(.double(3.5)))
+        #expect(!FactValue.int(Int.max).matches(.double(9.3e18)))
+    }
+
     @Test func rejectsBadExpectations() {
         for bad in ["{ equals: 1, gt: 0 }", "{ bogus: 1 }", "{ in: notalist }", "{ matches: \"(\" }", "{ exists: maybe }", "{ all: [] }", "[1, 2]"] {
             #expect(throws: RuleError.self) { _ = try expect(bad) }

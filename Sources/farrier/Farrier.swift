@@ -94,8 +94,9 @@ struct Posture: ParsableCommand {
     var json = false
 
     func run() throws {
-        let (packs, issues) = RuleLinter.loadPacks(at: rulePaths, source: .bundled)
-        let errors = issues.filter { $0.level == .error }
+        let (packs, loadIssues) = RuleLinter.loadPacks(at: rulePaths, source: .bundled)
+        // The same checks as `farrier rules lint`: duplicate ids and the like must stop evaluation too.
+        let errors = (loadIssues + RuleLinter.lint(packs)).filter { $0.level == .error }
         guard errors.isEmpty else {
             for e in errors { FileHandle.standardError.write(Data("\(e)\n".utf8)) }
             throw ExitCode(2)
@@ -116,6 +117,7 @@ struct Posture: ParsableCommand {
             }
             var line = "\(mark)  \(f.severity.rawValue.padding(toLength: 8, withPad: " ", startingAt: 0)) \(f.ruleID)"
             if f.managed { line += "  [managed by \(f.managedBy ?? "MDM")]" }
+            if f.managementUnknown { line += "  [MDM profiles not checked]" }
             print(line)
             if let reason = f.reason { print("      \(reason)") }
         }

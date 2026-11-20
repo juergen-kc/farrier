@@ -129,6 +129,43 @@ struct RulePackTests {
         #expect(lintCleanup(path: "~/Documents-old/*").isEmpty)
     }
 
+    @Test func protectedPathAliasesAreRejected() {
+        // PR #2 review: equivalent spellings and case must not get around the protected-path list.
+        for alias in ["~/./Documents/*", "~//Documents/*", "/./System/*", "~/documents/*", "~/Library/MAIL/*"] {
+            #expect(lintCleanup(path: alias).contains { $0.contains("protected path") }, "\(alias)")
+        }
+        // Non-canonical spellings are also rejected in their own right.
+        #expect(lintCleanup(path: "~/Library/Caches//x/*").contains { $0.contains("canonical") })
+        #expect(lintCleanup(path: "~/Library/Caches/./x/*").contains { $0.contains("canonical") })
+        // A root-wide glob reaches everything.
+        #expect(lintCleanup(path: "/*").contains { $0.contains("protected path") })
+    }
+
+    @Test func userPacksOnlyGetExplicitDeveloperArtifacts() {
+        // PR #2 review: not all of ~/Library/Developer. Xcode/UserData holds user-authored settings.
+        #expect(lintCleanup(path: "~/Library/Developer/Xcode/UserData/*", source: .user).contains { $0.contains("user pack target must be inside") })
+        #expect(lintCleanup(path: "~/Library/Developer/Xcode/Archives/*", source: .user).contains { $0.contains("user pack target must be inside") })
+        #expect(lintCleanup(path: "~/Library/Developer/Xcode/DerivedData/*", source: .user).isEmpty)
+    }
+
+    @Test func overflowingDurationsAndSizesAreErrorsNotCrashes() {
+        // PR #2 review: these used to trap on multiplication overflow.
+        #expect(RuleDuration("9223372036854775807w") == nil)
+        #expect(RuleSize.parse(.string("10000000000GB")) == nil)
+        #expect(RuleSize.parse(.string("-1")) == nil)
+        #expect(RuleSize.parse(.string("1024")) == Optional(Int64(1024)))
+        let r = parse(validCleanup.replacingOccurrences(of: "minAge: 14d", with: "minAge: 9223372036854775807w"))
+        #expect(errors(r.issues).contains { $0.contains("minAge") })
+    }
+
+    @Test func missingInputPathsAreErrors() {
+        // PR #2 review: a requested path that doesn't exist must not be dropped silently.
+        let rules = repoRoot.appendingPathComponent("rules").path
+        let (packs, issues) = RuleLinter.loadPacks(at: [rules, "/nonexistent/farrier-rules"], source: .bundled)
+        #expect(!packs.isEmpty)
+        #expect(errors(issues).contains { $0.contains("no such file") })
+    }
+
     @Test func pathTraversalIsRejected() {
         #expect(lintCleanup(path: "~/Library/Caches/../Mail/*").contains { $0.contains("..") })
     }

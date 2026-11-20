@@ -49,10 +49,16 @@ public enum FactValue: Sendable, Hashable {
         return current
     }
 
-    /// Equality that treats int and double as the same number.
+    /// Equality that treats int and double as the same number, without losing integer precision.
     public func matches(_ other: FactValue) -> Bool {
-        if let a = number, let b = other.number { return a == b }
-        return self == other
+        switch (self, other) {
+        case (.int(let a), .int(let b)): return a == b
+        case (.int(let a), .double(let b)), (.double(let b), .int(let a)):
+            // Exact: 2^53 + 1 must not equal 2^53 just because both round to the same Double.
+            guard let exact = Int(exactly: b) else { return false }
+            return exact == a
+        default: return self == other
+        }
     }
 
     /// Converts the output of `Yams.load(yaml:)` (Swift values, `[AnyHashable: Any]`, `NSNull`, `Date`).

@@ -41,6 +41,10 @@ public struct Finding: Sendable, Codable, Hashable {
     /// True when an MDM profile or declaration enforces this setting. Farrier then reports it but never changes it.
     public let managed: Bool
     public let managedBy: String?
+    /// True when the rule can be MDM-managed but the profile and declaration inventories weren't collected (or are
+    /// malformed). Farrier then can't rule out that a profile owns the setting, so the finding isn't fixable.
+    /// Note: a profile can be installed without MDM enrollment, so "not enrolled" doesn't settle it either.
+    public let managementUnknown: Bool
     /// Can Farrier fix it locally? Only if it fails, remediation is automatic, and it isn't MDM-managed.
     public let fixable: Bool
     public let guidance: String?
@@ -64,8 +68,14 @@ public struct PostureReport: Sendable, Codable {
 
 public enum PostureEngine {
     public static func evaluate(_ packs: [RulePack], facts: FactStore) -> PostureReport {
-        let payloads = Set(facts.value(for: CoreFacts.profilePayloadTypes)?.array?.compactMap(\.string) ?? [])
-        let declarations = Set(facts.value(for: CoreFacts.declarationTypes)?.array?.compactMap(\.string) ?? [])
+        // Inventories count only if they're present and valid lists of strings. Missing or malformed ≠ empty.
+        func inventory(_ fact: String) -> Set<String>? {
+            guard let list = facts.value(for: fact)?.array else { return nil }
+            let strings = list.compactMap(\.string)
+            return strings.count == list.count ? Set(strings) : nil
+        }
+        let payloads = inventory(CoreFacts.profilePayloadTypes)
+        let declarations = inventory(CoreFacts.declarationTypes)
 
         var findings: [Finding] = []
         for pack in packs {
@@ -78,9 +88,15 @@ public enum PostureEngine {
                 }
 
                 let manager = rule.managedBy.first { m in
-                    (m.payloadType.map(payloads.contains) ?? false) || (m.declarationType.map(declarations.contains) ?? false)
+                    (m.payloadType.map { payloads?.contains($0) ?? false } ?? false)
+                        || (m.declarationType.map { declarations?.contains($0) ?? false } ?? false)
                 }
                 let managedBy = manager.flatMap { $0.payloadType ?? $0.declarationType }
+                // Only rules that MDM can manage need the inventories. Each selector type needs its own inventory.
+                let needsPayloads = rule.managedBy.contains { $0.payloadType != nil }
+                let needsDeclarations = rule.managedBy.contains { $0.declarationType != nil }
+                let managementUnknown = managedBy == nil
+                    && ((needsPayloads && payloads == nil) || (needsDeclarations && declarations == nil))
 
                 let (status, reason): (Finding.Status, String?) = {
                     switch outcome {
@@ -91,8 +107,8 @@ public enum PostureEngine {
                 }()
                 findings.append(Finding(
                     ruleID: rule.id, title: rule.title, severity: rule.severity, status: status, reason: reason,
-                    managed: managedBy != nil, managedBy: managedBy,
-                    fixable: status == .fail && rule.remediation.automatic && managedBy == nil,
+                    managed: managedBy != nil, managedBy: managedBy, managementUnknown: managementUnknown,
+                    fixable: status == .fail && rule.remediation.automatic && managedBy == nil && !managementUnknown,
                     guidance: status == .pass ? nil : rule.remediation.guidance,
                     mappings: rule.mappings
                 ))

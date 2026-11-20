@@ -112,7 +112,9 @@ public struct RuleDuration: Sendable, Hashable, CustomStringConvertible {
     public init?(_ text: String) {
         let units: [Character: Int64] = ["s": 1, "m": 60, "h": 3_600, "d": 86_400, "w": 604_800]
         guard let unit = text.last, let factor = units[unit], let n = Int64(text.dropLast()), n > 0 else { return nil }
-        self.seconds = n * factor
+        let (seconds, overflow) = n.multipliedReportingOverflow(by: factor)
+        guard !overflow else { return nil }  // unrepresentable: a lint error, never a crash
+        self.seconds = seconds
         self.text = text
     }
 
@@ -127,9 +129,11 @@ public enum RuleSize {
         let units: [(String, Int64)] = [("GB", 1_000_000_000), ("MB", 1_000_000), ("KB", 1_000), ("B", 1)]
         for (suffix, factor) in units where s.hasSuffix(suffix) {
             guard let n = Int64(s.dropLast(suffix.count).trimmingCharacters(in: .whitespaces)), n >= 0 else { return nil }
-            return n * factor
+            let (bytes, overflow) = n.multipliedReportingOverflow(by: factor)
+            return overflow ? nil : bytes
         }
-        return Int64(s)
+        guard let n = Int64(s), n >= 0 else { return nil }  // a quoted "-1" must not slip through
+        return n
     }
 }
 
