@@ -19,10 +19,10 @@ echo "==> swift build (release)"
 swift build -c release
 BIN="$(swift build -c release --show-bin-path)/se-spike"
 
-sign() {  # sign <identity> <target> [extra codesign args…]
+sign() {  # sign <identity> <target> [extra codesign args…]; IDENT overrides the signing identifier
   local id="$1" target="$2"
   shift 2
-  codesign --force --sign "$id" --identifier dev.farrier.spike --options runtime --timestamp "$@" "$target"
+  codesign --force --sign "$id" --identifier "${IDENT:-dev.farrier.spike}" --options runtime --timestamp "$@" "$target"
 }
 
 make_app() {  # make_app <name>
@@ -40,6 +40,10 @@ if [[ -n "${APPLEDEV_IDENTITY:-}" ]]; then
   echo "==> V2 Apple Development"
   cp "$BIN" "$OUT/v2-appledev"
   sign "$APPLEDEV_IDENTITY" "$OUT/v2-appledev"
+
+  echo "==> V2b Apple Development, same team, DIFFERENT identifier (Approach C test C5)"
+  cp "$BIN" "$OUT/v2b-appledev-other"
+  IDENT=dev.farrier.other sign "$APPLEDEV_IDENTITY" "$OUT/v2b-appledev-other"
 else
   echo "--  V2 skipped (APPLEDEV_IDENTITY not set)"
 fi
@@ -79,7 +83,7 @@ fi
 
 echo
 echo "==> signatures"
-for t in "$OUT"/v1-adhoc "$OUT"/v2-appledev "$OUT"/v3-devid "$OUT"/v4-devid-kag "$OUT"/*.app; do
+for t in "$OUT"/v1-adhoc "$OUT"/v2-appledev "$OUT"/v2b-appledev-other "$OUT"/v3-devid "$OUT"/v4-devid-kag "$OUT"/*.app; do
   [[ -e "$t" ]] || continue
   echo "--- $t"
   codesign -dvv "$t" 2>&1 | grep -E '^(Identifier|TeamIdentifier|CodeDirectory|Authority|Runtime)' || true

@@ -19,6 +19,12 @@ usage: se-spike <command> [options]
   b-sign    --label L [sign options]
   b-delete  --label L
 
+  c-create  --label L [--policy P] [--pub PATH]
+                                         Approach C: CryptoKit key, blob in the login keychain,
+                                         readable only by this binary (fixes finding F1)
+  c-sign    --label L [sign options]
+  c-delete  --label L
+
   verify    --pub PATH --approval PATH [--tamper]
                                          the helper's check (run it with sudo too)
 
@@ -119,6 +125,18 @@ do {
 
     case "b-delete":
         Out.emit("b-delete", try ApproachB.delete(label: try required("label")))
+
+    case "c-create":
+        let label = try required("label")
+        let pubURL = URL(fileURLWithPath: opt("pub") ?? "farrier-c-\(label).pub")
+        Out.emit("c-create", try ApproachC.create(policy: try policy(), label: label, pubURL: pubURL))
+
+    case "c-sign":
+        let label = try required("label")
+        try runSign(approach: "C") { payload, reason in try ApproachC.sign(label: label, payload: payload, reason: reason) }
+
+    case "c-delete":
+        Out.emit("c-delete", try ApproachC.delete(label: try required("label")))
 
     case "verify":
         let pub = try Data(contentsOf: URL(fileURLWithPath: try required("pub")))

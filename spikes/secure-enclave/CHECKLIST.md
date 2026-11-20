@@ -117,10 +117,41 @@ problem is then signing-related, so go to section 4 next.
       `sudo $S verify --pub /tmp/appr-b.json.pub --approval /tmp/appr-b.json`. Expect a prompt on sign, and `ok: true` on verify.
 - [ ] **B4 clean up:** `$S b-delete --label t1`, then the same for `t2`.
 
+## 4b. Approach C (V2 and V2b now; V3 and V5 once Developer ID exists)
+
+Rebuild first so that V2b exists: `./scripts/build-variants.sh` (with `APPLEDEV_IDENTITY` set).
+
+```bash
+S=$PWD/out/v2-appledev; S1=$PWD/out/v1-adhoc; S2b=$PWD/out/v2b-appledev-other
+```
+
+**Never click "Always Allow"** in a keychain dialog during these tests. It permanently adds that binary to the
+item's access list, which invalidates later tests. Use **Deny**, or **Allow** (one time) only where the test says so.
+
+- [ ] **C1 create:** `$S c-create --label t1 --pub /tmp/c-t1.pub`. Expect `ok: true` and no dialogs at all.
+- [ ] **C2 sign with the trusted binary:** `$S c-sign --label t1 --out /tmp/c.json`. Expect **only** the
+      password or Touch ID prompt, and **no keychain dialog**. No "note: keychain read took …" line should be printed.
+      Then run `sudo $S verify --pub /tmp/c-t1.pub --approval /tmp/c.json`. Expect `ok: true`.
+- [ ] **C3 F1 attack, different binary (V1, ad hoc):** `$S1 c-sign --label t1 --out /tmp/c-attack.json`.
+      Expect a **keychain dialog first** (for example "v1-adhoc wants to use your confidential information stored in
+      'Farrier spike approval key (t1)' in your keychain"). **Take a screenshot**, then click **Deny**.
+      Expect `ok: false`, and record the `osstatus`.
+- [ ] **C4 Apple's `security` tool:** `security find-generic-password -s dev.farrier.spike.c -a t1 -w`.
+      Expect a keychain dialog naming `security`. Click **Deny**.
+- [ ] **C5 same team, different identifier (V2b):** `$S2b c-sign --label t1 --out /tmp/c-2b.json`. Record whether a
+      keychain dialog appears. If it does, the access list matches the identifier and not just the team, which is
+      what we want. Click **Deny**.
+- [ ] **C6 the dialog's "Allow" path:** repeat C3, but click **Allow** (not "Always Allow"). It may ask for the
+      login keychain password. Record that the password or Touch ID prompt then follows, and that it signs. This
+      confirms the keychain dialog is an extra gate, not a replacement for user presence.
+- [ ] **C7 SSH:** if you do E5, also run `$S c-sign --label t1` over SSH. Record whether the keychain is
+      reachable from an SSH session at all.
+- [ ] **C8 clean up:** `$S c-delete --label t1`
+
 ## 5. Clean up
 
 - [ ] `rm /tmp/farrier-*.key* /tmp/appr*.json`
-- [ ] Delete any Approach B keys (B4).
+- [ ] Delete any Approach B keys (B4) and Approach C items (C8).
 - [ ] Remove any fingerprint added for E3.
 
 ## 6. Decide
@@ -129,8 +160,9 @@ Fill in the decision at the bottom of RESULTS.md:
 
 | Outcome | Decision |
 |---|---|
-| A passes on V3 **and** V5 | **Preferred design.** CryptoKit Secure Enclave key, blob in `~/Library/Application Support/Farrier/`, public key registered with the helper. |
-| A passes on V5 only | Same design. The CLI must run from inside the app bundle (it does in the Homebrew cask anyway). |
+| C passes C1 to C5 on V3 **and** V5 | **Preferred design.** CryptoKit Secure Enclave key, blob in the login keychain restricted to Farrier, public key registered with the helper. Prompt text derived from the plan inside Farrier. |
+| C fails, but A passes on V3 and V5 | Approach A, with F1 recorded as a residual risk in THREAT_MODEL.md, T-3. |
+| A or C passes on V5 only | Same design. The CLI must run from inside the app bundle (it does in the Homebrew cask anyway). |
 | A fails, B passes on V6 | Ship an app bundle with an entitlement. Investigate whether a Developer ID provisioning profile is needed. |
 | Both fail | **Fallback design.** LocalAuthentication runs in the signed client, and the helper trusts the client's code signature. Update the residual risk in THREAT_MODEL.md, T-3. |
 | E5 shows a prompt from SSH | Add a mitigation either way: the helper refuses approvals whose session is not the console session. |

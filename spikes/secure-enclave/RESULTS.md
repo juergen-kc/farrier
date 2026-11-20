@@ -72,6 +72,20 @@ Prompt (V2, VM, password fallback). The icon is the generic "exec" icon with a l
 | B2 create, with group | – | | – | | |
 | B3 sign + verify | | | | | |
 
+## 4b. Approach C
+
+| Test | V2 | V3 | V5 | notes |
+|---|---|---|---|---|
+| C1 create, no dialogs | | | | |
+| C2 trusted binary: only the user-presence prompt | | | | |
+| C3 V1 (ad hoc) gets a keychain dialog; Deny gives an error | – | – | – | osstatus: |
+| C4 `security` tool gets a dialog | | | | |
+| C5 V2b (same team, other identifier) gets a dialog | | – | – | |
+| C6 Allow (once), then user-presence prompt, then signs | | | | |
+| C7 over SSH | | | | |
+
+Screenshot of the keychain dialog (C3):
+
 ## Findings
 
 **F1: An Approach A key is not tied to the calling code's identity.** (V1 ad hoc and V2 Apple Development both work.)
@@ -83,14 +97,15 @@ never silent, but the prompt can lie. The threat model lists same-user processes
 
 Options to evaluate:
 - **Approach B** (data-protection keychain): ties use of the key to the code signature, but needs an entitlement.
-- **Approach C** (to add to the spike): keep the CryptoKit key, but store its blob in the **login (file-based)
+- **Approach C** (added to the spike, see 4b): keep the CryptoKit key, but store its blob in the **login (file-based)
   keychain** as a generic password, with an ACL that trusts only Farrier's designated requirement. No
   entitlement should be needed. Another process reading it triggers a keychain access prompt.
 - Accept the risk, and state it as residual risk in T-3.
 
 ## Decision
 
-- [ ] Preferred design: Approach A (variant: ___ )
+- [ ] Preferred design: Approach C (variant: ___ )
+- [ ] Approach A, with F1 accepted as residual risk
 - [ ] Approach B with entitlement
 - [ ] Fallback design
 
