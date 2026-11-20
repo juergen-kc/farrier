@@ -250,7 +250,9 @@ struct Helper: ParsableCommand {
     }
 
     struct WhoAmI: ParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "How the helper sees this caller (console-session check).")
+        static let configuration = CommandConfiguration(
+            commandName: "whoami",
+            abstract: "How the helper sees this caller (console-session check).")
         func run() throws {
             try Helper.macOnly()
             #if os(macOS)
