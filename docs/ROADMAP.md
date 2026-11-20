@@ -38,9 +38,14 @@ Done:
 - [x] Unprivileged (T0) collectors: OS version, FileVault, SIP, Gatekeeper, firewall, MDM enrollment, software
       update settings; `farrier facts`, live `farrier posture`; golden parser tests; CI runs collection on a real
       macOS runner (docs/FACTS.md)
+- [x] Privileged helper, first cut: `Farrier.app` packaging (`scripts/build-app.sh`), SMAppService registration
+      (`farrier helper register|status|unregister`), mutual code-signing pinning, console-session check, version
+      handshake and idle exit, and the first T1 fact (`mdm.payloadTypes`). **Validated** on a macOS 27.2.1 VM
+      (Apple Development signing): registration and approval, root helper, `mdm.payloadTypes` collected, and the
+      helper survives an app reinstall without re-registering. Over SSH the helper refuses both the user
+      (session 0x5020, remote) and `sudo` (also not the console user), and the fact is reported as failed.
 
 To do:
-- Helper lifecycle: a version handshake (a mismatched helper exits after replying) and an idle exit
 - Approval key: setup, admin-authorized enrollment, the integrity check with automatic rotation, and the
   console-session check
 - Packaging: a root-owned `Farrier.app` with an icon; the Homebrew cask installs a `farrier` wrapper script;

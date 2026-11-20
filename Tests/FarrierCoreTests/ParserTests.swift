@@ -61,6 +61,60 @@ struct ParserTests {
         #expect(managed.value(at: "userApproved") == .bool(true))
     }
 
+    @Test func profilePayloadTypes() throws {
+        // Structure of `profiles show -output stdout-xml` as root: computer-level profiles under _computerlevel,
+        // each with ProfileItems carrying a PayloadType.
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <plist version="1.0"><dict>
+              <key>_computerlevel</key>
+              <array>
+                <dict>
+                  <key>ProfileIdentifier</key><string>com.jumpcloud.mdm.security</string>
+                  <key>ProfileItems</key>
+                  <array>
+                    <dict><key>PayloadType</key><string>com.apple.security.firewall</string></dict>
+                    <dict><key>PayloadType</key><string>com.apple.MCX.FileVault2</string></dict>
+                  </array>
+                </dict>
+                <dict>
+                  <key>ProfileItems</key>
+                  <array><dict><key>PayloadType</key><string>com.apple.security.firewall</string></dict></array>
+                </dict>
+              </array>
+            </dict></plist>
+            """
+        let v = try #require(Parsers.profilePayloadTypes(Data(xml.utf8)))
+        #expect(v == .array([.string("com.apple.MCX.FileVault2"), .string("com.apple.security.firewall")]))  // sorted, unique
+        // No profiles: profiles prints a sentence, which means an empty list (known), not unknown.
+        #expect(Parsers.profilePayloadTypes(Data("There are no configuration profiles installed\n".utf8)) == .array([]))
+        // Only user-level profiles: no _computerlevel key → empty.
+        let userOnly = #"<?xml version="1.0"?><plist version="1.0"><dict><key>_user</key><array/></dict></plist>"#
+        #expect(Parsers.profilePayloadTypes(Data(userOnly.utf8)) == .array([]))
+        // Anything else stays unknown.
+        #expect(Parsers.profilePayloadTypes(Data("profiles: this command requires root\n".utf8)) == nil)
+        #expect(Parsers.profilePayloadTypes(Data("Error: There are no configuration profiles installed? maybe\n".utf8)) == nil)
+    }
+
+    @Test func profilePayloadTypesFailClosed() {
+        func plist(_ profiles: String) -> Data {
+            Data(#"<?xml version="1.0"?><plist version="1.0"><dict><key>_computerlevel</key><array>\#(profiles)</array></dict></plist>"#.utf8)
+        }
+        let firewall = "<dict><key>PayloadType</key><string>com.apple.security.firewall</string></dict>"
+        // The no-profiles sentence inside a real profile's metadata must not empty the inventory.
+        let named = plist("<dict><key>ProfileDisplayName</key><string>There are no configuration profiles installed</string>"
+                          + "<key>ProfileItems</key><array>\(firewall)</array></dict>")
+        #expect(Parsers.profilePayloadTypes(named) == .array([.string("com.apple.security.firewall")]))
+        // A profile without ProfileItems, ProfileItems that isn't a list, or an item without a string PayloadType:
+        // the inventory would be incomplete, so it's unknown.
+        #expect(Parsers.profilePayloadTypes(plist("<dict><key>ProfileIdentifier</key><string>x</string></dict>")) == nil)
+        #expect(Parsers.profilePayloadTypes(plist("<dict><key>ProfileItems</key><string>x</string></dict>")) == nil)
+        #expect(Parsers.profilePayloadTypes(plist("<dict><key>ProfileItems</key><array>\(firewall)<dict/></array></dict>")) == nil)
+        #expect(Parsers.profilePayloadTypes(plist("<dict><key>ProfileItems</key><array><dict><key>PayloadType</key><integer>1</integer></dict></array></dict>")) == nil)
+        // A profile with an empty ProfileItems list is well-formed.
+        #expect(Parsers.profilePayloadTypes(plist("<dict><key>ProfileItems</key><array/></dict>")) == .array([]))
+    }
+
     @Test func unrecognisedValuesAreNil() {
         // PR #3 review: values outside the known set must be unknown, not guessed.
         #expect(Parsers.firewallGlobalState("Firewall is enabled. (State = 10)\n") == nil)          // not "on"

@@ -13,11 +13,28 @@ public struct CollectionNote: Sendable, Codable, Hashable {
     public let status: Status
     public let source: String
     public let detail: String?
+
+    public init(fact: String, status: Status, source: String, detail: String?) {
+        self.fact = fact
+        self.status = status
+        self.source = source
+        self.detail = detail
+    }
 }
 
 public struct CollectionResult: Sendable {
     public let facts: [String: FactValue]
     public let notes: [CollectionNote]
+
+    public init(facts: [String: FactValue], notes: [CollectionNote]) {
+        self.facts = facts
+        self.notes = notes
+    }
+
+    /// Adds another result (for example the helper's T1 facts) to this one.
+    public func merging(_ other: CollectionResult) -> CollectionResult {
+        CollectionResult(facts: facts.merging(other.facts) { _, new in new }, notes: notes + other.notes)
+    }
 }
 
 /// Collectors for the facts `posture.core` uses, all read-only and unprivileged (tier T0). Facts that need root

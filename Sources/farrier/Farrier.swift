@@ -1,17 +1,18 @@
 import ArgumentParser
 import FarrierCore
+import FarrierHelperKit
 import Foundation
 
 @main
 struct Farrier: ParsableCommand {
-    static let version = "0.1.0-dev"
+    static let version = FarrierVersion.string
 
     static let configuration = CommandConfiguration(
         commandName: "farrier",
         abstract: "Keep your Mac sound: hygiene, posture, drift, patching and debugging.",
         discussion: "v0.1: rule packs, unprivileged fact collection and posture evaluation. The privileged helper and the MCP server follow.",
         version: version,
-        subcommands: [Posture.self, Facts.self, Rules.self]
+        subcommands: [Posture.self, Facts.self, Rules.self, Helper.self]
     )
 }
 
@@ -26,8 +27,8 @@ struct Rules: ParsableCommand {
     struct Lint: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Validate rule packs (schema, safety, protected paths).")
 
-        @Argument(help: "Rule pack files or directories.")
-        var paths: [String] = ["rules"]
+        @Argument(help: "Rule pack files or directories. Default: the packs bundled with Farrier.app, or ./rules.")
+        var paths: [String] = []
 
         @Flag(help: "Treat the packs as user packs, with the stricter user-pack rules.")
         var user = false
@@ -37,7 +38,7 @@ struct Rules: ParsableCommand {
 
         func run() throws {
             let source: RulePack.Source = user ? .user : .bundled
-            let (packs, loadIssues) = RuleLinter.loadPacks(at: paths, source: source)
+            let (packs, loadIssues) = RuleLinter.loadPacks(at: paths.isEmpty ? defaultRulePaths() : paths, source: source)
             let issues = loadIssues + RuleLinter.lint(packs)
             let errors = issues.filter { $0.level == .error }.count
 
@@ -55,14 +56,14 @@ struct Rules: ParsableCommand {
     struct List: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "List the rules in the given packs.")
 
-        @Argument(help: "Rule pack files or directories.")
-        var paths: [String] = ["rules"]
+        @Argument(help: "Rule pack files or directories. Default: the packs bundled with Farrier.app, or ./rules.")
+        var paths: [String] = []
 
         @Flag(help: "Output JSON.")
         var json = false
 
         func run() throws {
-            let (packs, issues) = RuleLinter.loadPacks(at: paths, source: .bundled)
+            let (packs, issues) = RuleLinter.loadPacks(at: paths.isEmpty ? defaultRulePaths() : paths, source: .bundled)
             for issue in issues where issue.level == .error { FileHandle.standardError.write(Data("\(issue)\n".utf8)) }
             let rows = packs.flatMap { pack in
                 pack.rules.map { RuleSummary(pack: pack.id, id: $0.id, kind: $0.kind, title: $0.title) }
@@ -76,6 +77,16 @@ struct Rules: ParsableCommand {
     }
 }
 
+/// Rule packs when no path is given: those bundled in Farrier.app (`Contents/Resources/rules`) when running from
+/// the app, so the installed CLI works from any directory; otherwise `./rules` (a checkout).
+func defaultRulePaths() -> [String] {
+    if Bundle.main.bundlePath.hasSuffix(".app"), let resources = Bundle.main.resourceURL {
+        let bundled = resources.appendingPathComponent("rules")
+        if FileManager.default.fileExists(atPath: bundled.path) { return [bundled.path] }
+    }
+    return ["rules"]
+}
+
 // MARK: - farrier posture
 
 struct Posture: ParsableCommand {
@@ -84,8 +95,8 @@ struct Posture: ParsableCommand {
         discussion: "Collects facts from this Mac (read-only, unprivileged) unless --facts gives a JSON file instead. Facts that need the privileged helper are reported as unknown for now."
     )
 
-    @Option(name: .customLong("rules"), help: "Rule pack files or directories.")
-    var rulePaths: [String] = ["rules"]
+    @Option(name: .customLong("rules"), help: "Rule pack files or directories. Default: the packs bundled with Farrier.app, or ./rules.")
+    var rulePaths: [String] = []
 
     @Option(help: "JSON file with facts to use instead of collecting: { \"<fact id>\": <value>, … }")
     var facts: String?
@@ -94,7 +105,7 @@ struct Posture: ParsableCommand {
     var json = false
 
     func run() throws {
-        let (packs, loadIssues) = RuleLinter.loadPacks(at: rulePaths, source: .bundled)
+        let (packs, loadIssues) = RuleLinter.loadPacks(at: rulePaths.isEmpty ? defaultRulePaths() : rulePaths, source: .bundled)
         // The same checks as `farrier rules lint`: duplicate ids and the like must stop evaluation too.
         let errors = (loadIssues + RuleLinter.lint(packs)).filter { $0.level == .error }
         guard errors.isEmpty else {
@@ -105,7 +116,7 @@ struct Posture: ParsableCommand {
         if let facts {
             store = try StaticFactStore(json: Data(contentsOf: URL(fileURLWithPath: facts)))
         } else {
-            store = StaticFactStore(SystemCollectors().collect())
+            store = StaticFactStore(collectAllFacts())
         }
         let report = PostureEngine.evaluate(packs, facts: store)
 
@@ -147,7 +158,7 @@ struct Facts: ParsableCommand {
     var save: String?
 
     func run() throws {
-        let result = SystemCollectors().collect()
+        let result = collectAllFacts()
         if let save {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -169,6 +180,103 @@ struct Facts: ParsableCommand {
 struct FactsReport: Encodable {
     let facts: [String: FactValue]
     let notes: [CollectionNote]
+}
+
+/// T0 facts from the collectors, plus T1 facts from the privileged helper when it's available (macOS, running
+/// from Farrier.app, helper enabled, console session). Without the helper, T1 facts are noted as unavailable.
+func collectAllFacts() -> CollectionResult {
+    let base = SystemCollectors().collect()
+    #if os(macOS)
+    return base.merging(HelperClient.collectPrivilegedFacts())
+    #else
+    return base
+    #endif
+}
+
+// MARK: - farrier helper
+
+struct Helper: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Manage and check the privileged helper (macOS, from Farrier.app only).",
+        subcommands: [Status.self, Register.self, Unregister.self, Ping.self, WhoAmI.self]
+    )
+
+    static func macOnly() throws {
+        #if !os(macOS)
+        FileHandle.standardError.write(Data("the privileged helper exists only on macOS\n".utf8))
+        throw ExitCode(2)
+        #endif
+    }
+
+    struct Status: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Show the helper's registration status.")
+        func run() throws {
+            try Helper.macOnly()
+            #if os(macOS)
+            print("helper: \(HelperClient.status)")
+            #endif
+        }
+    }
+
+    struct Register: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Register the helper (macOS then asks you to approve it).")
+        func run() throws {
+            try Helper.macOnly()
+            #if os(macOS)
+            let (status, message) = HelperClient.register()
+            print("helper: \(status)")
+            if let message { print(message) }
+            #endif
+        }
+    }
+
+    struct Unregister: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Unregister the helper.")
+        func run() throws {
+            try Helper.macOnly()
+            #if os(macOS)
+            let (status, message) = HelperClient.unregister()
+            print("helper: \(status)")
+            if let message { print(message) }
+            #endif
+        }
+    }
+
+    struct Ping: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Talk to the helper: its version, and whether it runs as root.")
+        func run() throws {
+            try Helper.macOnly()
+            #if os(macOS)
+            do {
+                let info = try HelperClient.hello()
+                print("helper \(info.version) (protocol \(info.protocolVersion)), pid \(info.pid), euid \(info.euid)")
+                if info.willExit { print("version differs from this farrier (\(FarrierVersion.string)): the helper restarts on the next call") }
+            } catch {
+                FileHandle.standardError.write(Data("\(error)\n".utf8))
+                throw ExitCode(1)
+            }
+            #endif
+        }
+    }
+
+    struct WhoAmI: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "whoami",
+            abstract: "How the helper sees this caller (console-session check).")
+        func run() throws {
+            try Helper.macOnly()
+            #if os(macOS)
+            do {
+                let d = try HelperClient.whoAmI()
+                print("accepted: \(d.accepted)  uid \(d.callerEUID)  console user \(d.consoleUser)  session \(d.sessionBits)")
+                for r in d.reasons { print("  - \(r)") }
+            } catch {
+                FileHandle.standardError.write(Data("\(error)\n".utf8))
+                throw ExitCode(1)
+            }
+            #endif
+        }
+    }
 }
 
 // MARK: - Output
