@@ -56,6 +56,17 @@ FDA held by (record per state): Terminal / Claude / FarrierSpike
 | C | helper | | | | | |
 | C | via Claude Code | | | | | |
 
+**Baseline run (before changing any FDA setting; which apps held FDA: to be confirmed, probably Terminal):**
+
+| Probe | TCC.db | Safari | Mail | Messages | Caches |
+|---|---|---|---|---|---|
+| CLI from Terminal | ✅ | ✅ | ✅ | ✅ | ✅ |
+| helper (root, launchd) | ❌ EPERM | ❌ EPERM | ❌ EPERM | ❌ EPERM | ✅ |
+| MCP server via Claude Code | ✅ | ✅ | ✅ | ✅ | ✅ |
+| helper via Claude Code | ❌ EPERM | ❌ EPERM | ❌ EPERM | ❌ EPERM | ✅ |
+
+So far: **root does not bypass TCC.** Without its own grant, the helper is denied every FDA location. The CLI and the MCP server read everything because an app higher in their process chain (presumably Terminal) holds FDA.
+
 M14 user-folder dialog names:
 
 ## Claude Desktop (optional)
