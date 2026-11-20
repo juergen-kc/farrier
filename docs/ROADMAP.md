@@ -16,12 +16,22 @@ needs to be retrofitted.
       ends of the XPC connection. Also: the console-session check for approvals (finding F4), and enrolling the
       approval key with admin authorization.
       Code and test checklist: [spikes/smappservice-xpc](../spikes/smappservice-xpc/).
+      **Status:** passed on a macOS VM (Apple Development build). Registration, mutual pinning, the console-session
+      check (`SessionGetInfo` + console UID), admin-authorized enrollment, the full approval round trip, and the
+      access-list integrity check all work. Findings for v0.1: the helper must restart itself after updates, a
+      failed integrity check must rotate the key, the `farrier` command must be a wrapper (not a symlink), and the
+      app needs a real icon and name. Still needed: Developer ID on a physical Mac.
 - [ ] Swift MCP SDK: stdio, output schemas, annotations, and Tasks extension support for the 2026-07-28 spec.
 - [ ] Signing and notarization pipeline in GitHub Actions, plus a Homebrew cask.
 - [ ] Fixture capture script for Apple CLI outputs on macOS 14, 15, and 26.
 
 ## v0.1: Foundation and posture
 
+- Helper lifecycle: a version handshake (a mismatched helper exits after replying) and an idle exit
+- Approval key: setup, admin-authorized enrollment, the integrity check with automatic rotation, and the
+  console-session check
+- Packaging: a root-owned `Farrier.app` with an icon; the Homebrew cask installs a `farrier` wrapper script;
+  uninstall removes the LaunchDaemon, the enrolled key and the authorization right
 - `farrier-helper` with `readPrivileged` and `setSystemSetting` (small allowlist: firewall,
   stealth mode, automatic update settings)
 - Plan, approve and apply, with the journal

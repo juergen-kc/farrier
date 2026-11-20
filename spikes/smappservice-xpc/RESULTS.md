@@ -88,11 +88,17 @@ What the user sees (X2):
 
 ## Conclusions
 
-- Registration and update behaviour:
-- Pinning works in both directions: [ ]
-- Console-session check method confirmed: [ ] `SessionGetInfo` / [ ] needs an alternative
-- Enrollment with admin authorization: [ ]
-- Approval round trip: [ ]
-- Integrity check: [ ]
+(VM, Apple Development build. To repeat with Developer ID on a physical Mac.)
 
-ARCHITECTURE.md and THREAT_MODEL.md updated: [ ]
+- **Registration and update behaviour:** registration works from the CLI inside the bundle (`register()` throws
+  while the status becomes `requiresApproval`). An update keeps the registration, key and enrollment, but the
+  **running old helper is not replaced**, so the helper needs a version handshake and an idle exit.
+- Pinning works in both directions: [x]
+- Console-session check method confirmed: [x] `SessionGetInfo` + console UID / [ ] needs an alternative
+- Enrollment with admin authorization: [x]
+- Approval round trip: [x] (replay, tamper and expiry refused)
+- Integrity check: [x] (detects "Always Allow"; failure must rotate the key)
+- Packaging: the CLI only runs inside the bundle; use a wrapper script, not a symlink; root-owned bundle;
+  real icon and name.
+
+ARCHITECTURE.md and THREAT_MODEL.md updated: [x]

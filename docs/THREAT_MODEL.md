@@ -50,7 +50,11 @@
   clients so. This is defense in depth only. We don't rely on it.
 
 ### T-2. Another process abuses the helper (local privilege escalation)
-- The helper enforces a code-signing requirement (Team ID + bundle ID) on every connection.
+- The helper enforces a code-signing requirement (Team ID + exact identifier) on every connection. The client
+  pins the helper the same way. Verified: an ad hoc client and a same-team client with another identifier were
+  both rejected.
+- launchd attaches a launch constraint (identifier + Team ID) to the helper's job, so a modified or swapped
+  helper binary won't launch. `Farrier.app` is installed owned by root.
 - The helper has a fixed verb set. Payloads are typed and versioned, and unknown fields are rejected.
 - The helper **re-derives** everything. It re-matches each item against the rule's allowed roots, resolves
   paths with `O_NOFOLLOW`, checks the owner, refuses hard-linked files with a link count above 1, and
@@ -60,28 +64,34 @@
 - The helper is written in Swift (memory-safe), keeps its code small, and is the first fuzzing target.
 
 ### T-3. Approval forgery
-> Provisional design, based on the [Secure Enclave spike](../spikes/secure-enclave/RESULTS.md) (macOS VM,
-> Apple Development build). To be confirmed on a physical Mac with Touch ID and with Developer ID signing.
+> Provisional design, based on the [Secure Enclave spike](../spikes/secure-enclave/RESULTS.md) and the
+> [SMAppService/XPC spike](../spikes/smappservice-xpc/RESULTS.md) (both macOS VM, Apple Development build).
+> To be confirmed on a physical Mac with Touch ID and with Developer ID signing.
 
 - **The helper verifies approvals itself.** A plan approval is a signature over the plan hash, a helper-issued
   nonce and an expiry, made by a Secure Enclave key that needs user presence for every signature. The helper
-  checks it against a public key enrolled with admin authorization. A compromised user process can't forge it
-  without the user being present.
+  checks it against a public key enrolled with admin authorization (an `authenticate-admin` right, with the
+  dialog shown each time). A compromised user process can't forge it without the user being present.
 - **The key can only be used by Farrier.** Its blob is stored in the login keychain, with an access list that
   trusts only Farrier's signing identity. In the spike, every other binary (an ad hoc build, Apple's `security`
   tool, and a same-team binary with another identifier) got a keychain dialog and a login-password request
   before reaching the signing prompt. A Farrier update keeps access (spike tests C3 to C5 and C9).
-- **Replay.** Each approval includes a one-time nonce from the helper and expires after 5 minutes.
+- **Replay.** Each approval includes a one-time nonce from the helper and expires after 5 minutes. A nonce is
+  consumed by any submission. Verified: replay, tampering and expiry were each refused.
 - **Misleading prompts.** The prompt names the calling executable by file name, and its text is supplied by
   the caller (spike F1). Mitigations: only Farrier can use the key (above). Farrier derives the prompt text
   from the plan itself, never from arguments or agent output. And the plan hash in the prompt is the one the
   helper executes.
 - **Prompts started remotely (spike F4).** A process in an SSH session *can* trigger a prompt that appears on
   the Mac's screen. The keychain blocks this by default (`errSecInteractionNotAllowed` in SSH sessions). The
-  helper also **requires the caller to be in the console session**, which covers an attacker who knows the
-  password and unlocks the keychain over SSH.
+  helper also **requires the caller to be in the console session**: graphics access, not remote, and the console
+  user's UID (`SessionGetInfo` on the caller's audit session). That covers an attacker who knows the password and
+  unlocks the keychain over SSH. Verified: SSH was refused before any prompt, and so was `sudo` at the console,
+  which shares the console's audit session and is caught only by the UID check.
 - **"Always Allow" (spike F2).** A user could permanently trust an attacker's binary in a keychain dialog. The
-  item label warns against it, and Farrier checks the item's access list at startup and offers to rotate the key.
+  item label warns against it. Farrier checks the item's access list at startup, and **rotates the key** if anything
+  else is trusted. Rotating, not just warning, matters because the other program has then already been able to
+  read the blob, which works from any process. Verified: the check detected `/usr/bin/security` after "Always Allow".
 - **Residual risks:**
   - code injected into the genuine, signed Farrier process (reduced by the hardened runtime and library validation)
   - a user who approves a prompt without reading it
@@ -141,7 +151,7 @@ hostnames, serial numbers, Wi-Fi network names, app lists and file paths. Mitiga
 
 - Confirm the provisional approval design (T-3) on a physical Mac with Touch ID, and with Developer ID
   signing, both as a bare binary and inside the app bundle.
-- How exactly does the helper determine the caller's login session and compare it with the console session?
-  (Belongs in the SMAppService/XPC spike.)
+- Helper updates: confirm the version handshake and idle exit really replace a running old helper (the spike
+  showed that an update alone doesn't).
 - Should the helper refuse to run while the user session is locked or fast-user-switched?
 - What is the JumpCloud write-back scope, and what can a device actually modify about itself?

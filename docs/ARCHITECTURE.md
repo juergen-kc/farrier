@@ -60,6 +60,13 @@ fixture tests for every supported macOS version.
 - Every command supports `--json`, whose output matches the MCP tool's `structuredContent` schema.
 - `farrier mcp` starts the stdio MCP server. It runs inside the same signed binary, so Full Disk Access
   (FDA) and other TCC grants apply to one stable identity, not to a terminal or interpreter.
+- **The binary only runs from inside `Farrier.app`.** Its signature also covers the bundle (`Info.plist`), so a
+  copy taken out of the bundle is killed at launch. That's verified, and it's good for security.
+- **The `farrier` command on `PATH` is a wrapper script**, not a symlink:
+  `exec /Applications/Farrier.app/Contents/MacOS/farrier "$@"`. Through a symlink, `Bundle.main` resolves to the
+  symlink's directory and loses the bundle. The helper still accepts the caller, but anything that looks up
+  Farrier's own bundle breaks.
+- `Farrier.app` is installed **owned by root**, so nothing running as the user can modify it.
 
 ### `farrier mcp` (MCP server)
 
@@ -78,12 +85,31 @@ fixture tests for every supported macOS version.
 
 ### `farrier-helper` (privileged helper)
 
+> Verified in the [SMAppService/XPC spike](../spikes/smappservice-xpc/RESULTS.md) (macOS VM, Apple Development
+> build), unless marked otherwise.
+
 - Registered with `SMAppService.daemon(plistName:)` from
-  `Farrier.app/Contents/Library/LaunchDaemons/`. The user approves it once in
-  System Settings → General → Login Items & Extensions.
+  `Farrier.app/Contents/Library/LaunchDaemons/`. The LaunchDaemon plist uses `BundleProgram`, `MachServices`
+  and `AssociatedBundleIdentifiers`.
+- **Registration flow:**
+  - Before registering, the status is `notFound`.
+  - `register()` **throws** (`SMAppServiceErrorDomain` 1, "Operation not permitted") while the status becomes
+    `requiresApproval`. Farrier treats that as "waiting for approval", not as a failure, and opens
+    System Settings → General → Login Items.
+  - The user sees a notification, *"App Background Activity — 'Farrier' can run in the background for all users"*,
+    with Allow / Don't Allow. Farrier also appears under **Background App Activity**, with its bundle name and icon,
+    off until approved. **So the app must ship a real icon and a clear name**: that's all the user sees when deciding.
+  - After approval: `enabled`.
+- **launchd pins the helper.** It attaches a launch constraint (signing identifier + Team ID) to the job, so a
+  modified or swapped helper binary won't launch.
 - Listens on one Mach service. On every incoming connection it calls
   `NSXPCConnection.setCodeSigningRequirement(_:)` with a requirement pinned to Farrier's
-  bundle identifier **and** Team ID. The client checks the helper the same way.
+  bundle identifier **and** Team ID:
+  `anchor apple generic and identifier "<id>" and certificate leaf[subject.OU] = "<team>"`. The client
+  pins the helper the same way. Both sides read their own Team ID from their signature, so nothing is hardcoded.
+  - In the spike, an ad hoc–signed client, and a client with the same certificate but a different identifier,
+    were both rejected: the client sees `NSCocoaErrorDomain` 4097, and the helper's methods never run. A client
+    expecting a different helper refused it (4102).
 - The protocol is a small `@objc` interface that passes versioned `Codable` payloads as `Data`.
 - It runs **only fixed verbs**. There is no "run this command" verb. The initial verb set:
 
@@ -97,12 +123,21 @@ fixture tests for every supported macOS version.
   | `uninstallPkgReceipt(id, planProof)` | Remove installer receipts and files listed in a bill of materials (BOM) |
   | `adapterRequest(adapter, op, planProof?)` | Make a signed management-plane call (JumpCloud System Context) |
   | `beginApproval(planHash)` | Issue a one-time nonce and expiry for one approval (prevents replay) |
-  | `enrollApprovalKey(publicKey)` | Register the approval public key. Requires **admin** authorization (see below) |
+  | `enrollApprovalKey(publicKey, authorization)` | Register the approval public key. Requires **admin** authorization (see below) |
+  | `revokeApprovalKey(authorization)` | Remove the enrolled key, for rotation or uninstall. Requires admin authorization |
+  | `submitApproval(payload, signature)` | Verify a signed approval; consumes the nonce |
 
 - The helper **re-validates** every item itself. It does not trust the client's plan contents.
   It resolves paths with `O_NOFOLLOW` on each path component, checks owner, mode and inode against what the plan
   recorded, rejects anything outside the allowed roots for that rule, and never follows symlinks.
-- It exits when idle (launchd on demand), so nothing runs between uses.
+- **Lifecycle and updates.** launchd starts the helper on demand. An app update keeps the registration (no new
+  approval), but **does not replace a helper process that is already running**. In the spike, the old binary kept
+  answering until `launchctl kickstart -k`. The client can't restart it (that needs root), so:
+  - every request carries the client's build version. If it differs from the helper's own, the helper answers and
+    then exits, and launchd starts the new binary on the next connection.
+  - the helper also exits after a short idle period (target: 60 s), so nothing runs between uses.
+  - in-memory state, such as approval nonces, is lost when the helper exits. That's safe, because the approval
+    just fails and must be repeated.
 
 ## Operation tiers
 
@@ -139,8 +174,10 @@ owner). `planHash` is the SHA-256 of the canonical encoding.
 user process can't produce one without the user being present.
 
 > Status: **provisional.** This design ("Approach C") was chosen from the
-> [Secure Enclave spike](../spikes/secure-enclave/RESULTS.md), run on a macOS VM with an Apple Development build.
-> It becomes final once the core tests pass on a physical Mac with Touch ID and with Developer ID signing.
+> [Secure Enclave spike](../spikes/secure-enclave/RESULTS.md) and exercised end to end, with enrollment, nonces and
+> the session check, in the [SMAppService/XPC spike](../spikes/smappservice-xpc/RESULTS.md). Both ran on a macOS VM
+> with an Apple Development build. It becomes final once the core tests pass on a physical Mac with Touch ID and
+> with Developer ID signing.
 
 **The approval key**
 - A P-256 key in the Secure Enclave, created with CryptoKit (`SecureEnclave.P256.Signing.PrivateKey`) and
@@ -159,13 +196,23 @@ The same keychain also refuses SSH sessions (finding F4).
 
 **Enrollment**
 - `farrier setup` creates the key and calls the helper's `enrollApprovalKey`. The helper requires **admin**
-  authorization (Authorization Services) for this, so a same-user process can't swap in its own key.
-- The helper stores the public key in a root-owned file. Changing the key later means re-enrolling, which is
-  journaled and needs admin authorization again.
+  authorization for this, so a same-user process can't swap in its own key.
+- How it works (verified):
+  - At startup, the helper defines its own right, `dev.farrier.enroll-approval-key`, with the rule
+    `authenticate-admin`, in the authorization database.
+  - The client sends an `AuthorizationExternalForm`. The helper requests the right with interaction allowed.
+  - The admin dialog appears in the user's session, credited to the **app**: *"enroll a Farrier approval key —
+    Enter your password to continue with 'Farrier'."*
+  - It asks every time, with no silent reuse. Cancel returns `errAuthorizationCanceled` (-60006).
+- The helper stores the public key at `/Library/Application Support/Farrier/approval-key.pub`. It sets
+  `root:wheel` and `0644` **explicitly**: in the spike, the group was inherited as `admin`. Changing the key later
+  means re-enrolling, which is journaled and needs admin authorization again.
+- The authorization right stays in the system database until removed, so **uninstall must remove it**
+  (`security authorizationdb remove`). The database also records the identity of the code that created the right.
 
 **Approval flow**
 1. The client calls `beginApproval(planHash)`. The helper returns a one-time 32-byte nonce and an expiry
-   (default 5 minutes).
+   (default 5 minutes; the spike used 60 s). Nonces live in the helper's memory.
 2. The client builds the payload:
    `"farrier-plan-approval-v1" 0x00 | planHash (32) | nonce (32) | expiresAt (int64 BE)`.
 3. It reads the key blob from the keychain and signs the payload. That triggers the prompt, whose text Farrier
@@ -173,17 +220,39 @@ The same keychain also refuses SSH sessions (finding F4).
    *"farrier is trying to approve plan 3f9a…: delete 2 APFS snapshots (12.4 GB), irreversible."*
    The prompt names the **executable file name**, so the binary must be called `farrier`.
 4. The signature (ECDSA P-256, DER) is the `planProof`. The helper verifies it against the enrolled public key,
-   checks that the nonce is unused and unexpired, and that `planHash` matches the plan it was given.
+   checks that the nonce is unused and unexpired, and that `planHash` and the expiry match what it issued. A nonce
+   is **consumed by any submission**, valid or not. In the spike, a replay, a tampered signature and an expired
+   approval were each refused.
 
-**Console-session check (required).** The helper accepts approvals only from the user session at the screen.
-It compares the XPC caller's login session with the console user's session, and rejects remote (SSH) or
-background sessions. The spike showed that a prompt *can* be triggered from SSH and appears on the screen
-(finding F4). The keychain blocks that by default, but not if an attacker who knows the password unlocks the
-keychain over SSH. So this check is mandatory, not optional. Details: **SPIKE**, in the SMAppService/XPC spike.
+**Console-session check (required, verified).** The helper accepts approval-related calls (`beginApproval`,
+`submitApproval`, enrollment, revocation) only from the user session at the screen. For each call:
+1. Take the caller's audit session ID from the XPC connection (`NSXPCConnection.auditSessionIdentifier`).
+2. Call `SessionGetInfo` on it. This works from root for another process's session. Require the session to have
+   **graphics access** (bit `0x0010`) and **not be remote** (bit `0x1000`).
+3. Require the caller's effective UID to be the **console user** (`SCDynamicStoreCopyConsoleUser`).
 
-**Integrity check.** At startup, Farrier reads the key item's access list. If anything other than Farrier is
-trusted (for example, after a user clicked "Always Allow" in an attacker's dialog), Farrier warns and offers to
-rotate the key (re-enrollment requires admin authorization).
+Spike results:
+
+| Caller | Session bits | Result |
+|---|---|---|
+| Terminal at the screen | `0x6030` | accepted |
+| SSH | `0x5020` (no graphics, remote) | refused before any prompt |
+| `sudo` at the screen | `0x6030` | refused |
+
+`sudo` stays in the console's audit session, so **step 3 is essential**: step 2 alone would accept it.
+
+Why it's mandatory: a prompt *can* be triggered from SSH and appears on the screen (Secure Enclave spike, F4).
+The keychain blocks that by default, but not if an attacker who knows the password unlocks the keychain over SSH.
+
+**Integrity check (verified).** At startup, Farrier reads the key item's access list (`SecKeychainItemCopyAccess`).
+The decrypt/sign entry must trust only Farrier, which the keychain records as the **bundle path**, and the
+change-ACL entry must trust no application. If anything else is trusted (for example, after a user clicked
+"Always Allow" in an attacker's dialog), **Farrier rotates the key**, not just warns: delete it, create a new one,
+and re-enroll with admin authorization.
+
+Rotation is necessary because "Always Allow" means the other program has already been able to read the key blob,
+and the blob can be used from any process (finding F1). In the spike, the access list detected
+`/usr/bin/security` after "Always Allow", and `security` had indeed printed the blob.
 
 **Apply.** `farrier apply <id>` (or the `apply_plan` tool) loads the plan, checks that the
 hash and expiry are valid, and re-fingerprints every item. Any mismatch drops that item and
