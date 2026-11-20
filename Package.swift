@@ -17,11 +17,16 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
         .package(url: "https://github.com/jpsim/Yams.git", from: "6.0.0"),
+        // SHA-256 and P-256 on Linux (CI tests the approval and journal code there). On macOS, CryptoKit is used.
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
     ],
     targets: [
         .target(
             name: "FarrierCore",
-            dependencies: [.product(name: "Yams", package: "Yams")]
+            dependencies: [
+                .product(name: "Yams", package: "Yams"),
+                .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+            ]
         ),
         .target(
             name: "FarrierHelperKit",
@@ -43,7 +48,11 @@ let package = Package(
         ),
         .testTarget(
             name: "FarrierCoreTests",
-            dependencies: ["FarrierCore", "FarrierHelperKit"]
+            dependencies: [
+                "FarrierCore",
+                "FarrierHelperKit",
+                .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+            ]
         ),
     ],
     swiftLanguageModes: [.v6]

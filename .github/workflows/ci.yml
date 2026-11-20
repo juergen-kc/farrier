@@ -34,6 +34,17 @@ jobs:
         run: swift run farrier rules lint rules
       - name: Evaluate the sample facts
         run: swift run farrier posture --facts examples/facts-sample.json
+      # The sample's firewall is off and not managed, so this must produce a T4 plan with exactly that item.
+      - name: Plan fixes for the sample facts
+        run: |
+          swift run farrier plan posture --facts examples/facts-sample.json
+          swift run farrier plan posture --facts examples/facts-sample.json --json > plan.json
+          cat plan.json
+          test "$(grep -c '"action" : ' plan.json)" = 1
+          grep -q '"action" : "firewall.enable"' plan.json
+          grep -q '"tier" : "T4"' plan.json
+          swift run farrier plan list
+          swift run farrier journal verify
 
   # The product target. Later PRs add the macOS-only collectors, helper and MCP server here.
   macos:
@@ -56,6 +67,9 @@ jobs:
         run: swift run farrier facts
       - name: Live posture on the runner
         run: swift run farrier posture
+      # Without the helper, MDM profiles can't be checked, so nothing may be planned (the firewall is left out).
+      - name: Plan on the runner (no helper)
+        run: swift run farrier plan posture
       - name: Fail if any parser didn't recognise its output
         run: |
           swift run farrier facts --json > facts.json

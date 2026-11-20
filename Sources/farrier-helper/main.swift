@@ -17,6 +17,8 @@ guard let team = identity.teamID else {
 let clientRequirement = codeRequirement(identifier: HelperConstants.appIdentifier, teamID: team)
 helperLog("starting version=\(FarrierVersion.string) pid=\(getpid()) id=\(identity.identifier ?? "?") team=\(team)")
 
+helperLog(Authz.ensureRight())
+
 let lifecycle = Lifecycle(idleTimeout: 60)
 
 final class ListenerDelegate: NSObject, NSXPCListenerDelegate {

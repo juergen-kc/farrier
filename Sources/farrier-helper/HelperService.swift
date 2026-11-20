@@ -95,6 +95,142 @@ final class HelperService: NSObject, FarrierHelperProtocol {
     }
 }
 
+// MARK: - Approval key and plans
+
+extension HelperService {
+    /// Shared by all connections: nonces must survive a reconnect between `beginApproval` and `applyPlan`.
+    static let approvals = ApprovalBook()
+    static let journal = Journal(url: URL(fileURLWithPath: HelperConstants.helperJournalPath), mode: 0o644)
+
+    /// The checks every state-changing verb starts with: same version, console session. Nil means "go ahead".
+    private func gate(_ clientVersion: String, _ verb: String) -> String? {
+        if handshake(clientVersion) { return "helper restarting after update; retry" }
+        let decision = callerDecision()
+        guard decision.accepted else {
+            helperLog("refused \(verb): \(decision.reasons.joined(separator: "; "))")
+            return "caller is not in the console session: \(decision.reasons.joined(separator: "; "))"
+        }
+        return nil
+    }
+
+    private static func enrolledKey() -> Data? {
+        FileManager.default.contents(atPath: HelperConstants.approvalKeyPath)
+    }
+
+    private static func record(_ planID: String, _ planHash: String, _ outcome: String, ruleID: String? = nil,
+                               action: String? = nil, detail: String? = nil) {
+        let r = JournalRecord(time: Int64(Date().timeIntervalSince1970), actor: "helper", planID: planID, planHash: planHash,
+                              ruleID: ruleID, action: action, outcome: outcome, detail: detail)
+        do { try journal.append(r) } catch { helperLog("journal append failed: \(error)") }
+    }
+
+    func approvalKeyStatus(clientVersion: String, reply: @escaping (Data) -> Void) {
+        if let refusal = gate(clientVersion, "approvalKeyStatus") {
+            return reply(HelperWire.encode(ApprovalKeyStatus(enrolled: false, fingerprint: nil, error: refusal)))
+        }
+        guard let key = Self.enrolledKey() else {
+            return reply(HelperWire.encode(ApprovalKeyStatus(enrolled: false, fingerprint: nil, error: nil)))
+        }
+        reply(HelperWire.encode(ApprovalKeyStatus(enrolled: true, fingerprint: FarrierCrypto.sha256(key).hexString, error: nil)))
+    }
+
+    func enrollApprovalKey(publicKey: Data, authorization: Data, clientVersion: String, reply: @escaping (Data) -> Void) {
+        func fail(_ message: String) {
+            helperLog("enrollApprovalKey refused: \(message)")
+            reply(HelperWire.encode(ApprovalKeyStatus(enrolled: Self.enrolledKey() != nil, fingerprint: nil, error: message)))
+        }
+        if let refusal = gate(clientVersion, "enrollApprovalKey") { return fail(refusal) }
+        guard FarrierCrypto.isP256PublicKey(publicKey) else { return fail("not a P-256 public key") }
+        let auth = Authz.check(authorization)
+        guard auth == errAuthorizationSuccess else { return fail(Authz.describe(auth)) }
+        let fingerprint = FarrierCrypto.sha256(publicKey).hexString
+        do {
+            try Self.writeRootFile(publicKey, to: HelperConstants.approvalKeyPath)
+        } catch {
+            return fail("could not store the key: \(error)")
+        }
+        helperLog("enrolled approval key \(fingerprint)")
+        Self.record("-", "-", "keyEnrolled", detail: fingerprint)
+        reply(HelperWire.encode(ApprovalKeyStatus(enrolled: true, fingerprint: fingerprint, error: nil)))
+    }
+
+    func revokeApprovalKey(authorization: Data, clientVersion: String, reply: @escaping (Data) -> Void) {
+        func fail(_ message: String) {
+            helperLog("revokeApprovalKey refused: \(message)")
+            reply(HelperWire.encode(ApprovalKeyStatus(enrolled: Self.enrolledKey() != nil, fingerprint: nil, error: message)))
+        }
+        if let refusal = gate(clientVersion, "revokeApprovalKey") { return fail(refusal) }
+        let auth = Authz.check(authorization)
+        guard auth == errAuthorizationSuccess else { return fail(Authz.describe(auth)) }
+        do {
+            if FileManager.default.fileExists(atPath: HelperConstants.approvalKeyPath) {
+                try FileManager.default.removeItem(atPath: HelperConstants.approvalKeyPath)
+            }
+        } catch {
+            return fail("could not remove the key: \(error)")
+        }
+        helperLog("approval key revoked")
+        Self.record("-", "-", "keyRevoked")
+        reply(HelperWire.encode(ApprovalKeyStatus(enrolled: false, fingerprint: nil, error: nil)))
+    }
+
+    func beginApproval(planHash: Data, clientVersion: String, reply: @escaping (Data) -> Void) {
+        if let refusal = gate(clientVersion, "beginApproval") {
+            return reply(HelperWire.encode(BeginApprovalReply(grant: nil, error: refusal)))
+        }
+        guard planHash.count == 32 else { return reply(HelperWire.encode(BeginApprovalReply(grant: nil, error: "planHash must be 32 bytes"))) }
+        guard Self.enrolledKey() != nil else {
+            return reply(HelperWire.encode(BeginApprovalReply(grant: nil, error: "no approval key is enrolled; run `farrier setup`")))
+        }
+        let grant = Self.approvals.issue(planHash: planHash, now: Int64(Date().timeIntervalSince1970))
+        reply(HelperWire.encode(BeginApprovalReply(grant: grant, error: nil)))
+    }
+
+    func applyPlan(plan: Data, payload: Data, signature: Data, clientVersion: String, reply: @escaping (Data) -> Void) {
+        let hashHex = FarrierCrypto.sha256(plan).hexString
+        let planID = (try? JSONDecoder().decode(Plan.self, from: plan))?.id ?? "?"
+        func refuse(_ message: String) {
+            helperLog("applyPlan \(planID) refused: \(message)")
+            Self.record(planID, hashHex, "refused", detail: message)
+            reply(HelperWire.encode(ApplyReply(planID: planID, results: [], error: message)))
+        }
+        if let refusal = gate(clientVersion, "applyPlan") { return refuse(refusal) }
+        guard let host = HostIdentity.hardwareUUID() else { return refuse("could not read this Mac's hardware UUID") }
+
+        let verified = PlanApproval.verify(planData: plan, payload: payload, signature: signature,
+                                           publicKeyDER: Self.enrolledKey(), book: Self.approvals, host: host,
+                                           now: Int64(Date().timeIntervalSince1970))
+        let approved: Plan
+        switch verified {
+        case .failure(let error): return refuse(error.description)
+        case .success(let p): approved = p
+        }
+        Self.record(approved.id, hashHex, "approved", detail: "\(approved.items.count) item(s), \(approved.tier.rawValue)")
+
+        var results: [ItemResult] = []
+        for item in approved.items {
+            lifecycle.touch()
+            let r = Remediator.apply(item)
+            helperLog("plan \(approved.id) \(item.action): \(r.outcome.rawValue) \(r.detail ?? "")")
+            Self.record(approved.id, hashHex, r.outcome.rawValue, ruleID: item.ruleID, action: item.action, detail: r.detail)
+            results.append(r)
+        }
+        reply(HelperWire.encode(ApplyReply(planID: approved.id, results: results, error: nil)))
+    }
+
+    /// Writes root:wheel 0644 explicitly (in the spike, the group was otherwise inherited as admin), in a
+    /// root:wheel 0755 directory.
+    static func writeRootFile(_ data: Data, to path: String) throws {
+        let fm = FileManager.default
+        let dir = (path as NSString).deletingLastPathComponent
+        let owner: [FileAttributeKey: Any] = [.ownerAccountID: NSNumber(value: 0), .groupOwnerAccountID: NSNumber(value: 0)]
+        try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try fm.setAttributes(owner.merging([.posixPermissions: NSNumber(value: 0o755)]) { $1 }, ofItemAtPath: dir)
+        try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        try fm.setAttributes(owner.merging([.posixPermissions: NSNumber(value: 0o644)]) { $1 }, ofItemAtPath: path)
+    }
+}
+
 /// The T1 facts themselves. Fixed commands, absolute paths, parsed into derived facts (no raw content returned).
 enum PrivilegedFacts {
     static func read(_ fact: PrivilegedFact) -> (FactValue?, String?) {
