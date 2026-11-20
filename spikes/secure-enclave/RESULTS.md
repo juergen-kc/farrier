@@ -82,7 +82,8 @@ Prompt (V2, VM, password fallback). The icon is the generic "exec" icon with a l
 | C4 `security` tool gets a dialog | ✅ | | | Deny: no output |
 | C5 V2b (same team, other identifier) gets a dialog | ✅ | – | – | -128 on Deny, so trust is per binary, not per team |
 | C6 Allow (once), then user-presence prompt, then signs | ✅ | | | keychain read 5.77 s (login keychain password), then signing 3.83 s: two gates |
-| C7 over SSH | ✅? | | | `-25308` (errSecInteractionNotAllowed) on the keychain read, before any prompt. **Inconclusive:** item `t7` had already been deleted. Re-run pending. |
+| C7 over SSH | ✅ | | | Re-run with `t7` present: still `-25308` (errSecInteractionNotAllowed) on the keychain read, before any prompt. The first run (item already deleted) gave the same error. |
+| C7b over SSH after `security unlock-keychain` | | | | not run yet; expected: the genuine binary reads the key and the prompt appears on the console (the residual part of F4) |
 | C9 still trusted after a code change and rebuild (updates) | ✅ | | | CDHash changed (08d9461b… to 50303002…); no keychain dialog, only the user-presence prompt (10.52 s). An earlier run with only a comment changed was inconclusive, because the binary may not have changed. |
 
 Keychain dialog (C3, V2 on the VM). C4 and C5 look the same, apart from the name:
@@ -121,10 +122,12 @@ So:
 
 **F4: An approval prompt can be triggered from an SSH session (Approach A).** Over SSH, `a-sign` reached
 user-presence authentication, and the prompt appeared on the console session (to be confirmed). The person at the
-desk can't tell that the request came from a remote shell. Approach C appears to block this, because the
-keychain read fails with `-25308` in an SSH session (re-run pending). Independent of the approach, the helper
-should also refuse approvals that don't come from the console session: it can check the caller's login
-session for that.
+desk can't tell that the request came from a remote shell. **Approach C blocks this by default:** the keychain
+read fails with `-25308` in an SSH session (C7, confirmed). That depends on the login keychain refusing
+dialogs to SSH sessions, though. An attacker who knows the user's password could run `security unlock-keychain`
+over SSH and then call the genuine Farrier binary (C7b). So the helper must also refuse approvals that don't
+come from the console session, by checking the caller's login session. Planned as a required control for
+v0.1, independent of the approach.
 
 **F3 (resolved on V2):** updates keep access. After a real code change (new CDHash), the access list still matched, so it matches the signing identity (designated requirement), not the exact binary. To be repeated with Developer ID (V3/V5).
 
