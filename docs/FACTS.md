@@ -35,6 +35,7 @@ Rules of the road:
 | `launchd.items` | full launchd plists, signature and notarization checks across `/Library` | `posture.core.unsigned-launch-items` |
 | `tcc.grants` | `TCC.db` needs Full Disk Access | inventory, posture |
 
-**Until `mdm.payloadTypes` and `mdm.declarationTypes` are collected**, the posture engine can't rule out that an MDM
-profile owns a setting on an enrolled Mac (or one whose enrollment is unknown). So it marks those findings
-`managementUnknown` and **never `fixable`**.
+**Until `mdm.payloadTypes` and `mdm.declarationTypes` are collected** (as valid lists of strings), the posture engine
+can't rule out that a configuration profile owns a setting. That holds even on a Mac that isn't MDM-enrolled, because
+a profile can be installed by hand. So every finding for a rule with `managedBy` is marked `managementUnknown` and is
+**never `fixable`**. `mdm.enrollment` is informational.

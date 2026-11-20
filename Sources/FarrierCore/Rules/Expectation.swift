@@ -69,16 +69,30 @@ public indirect enum Expectation: Sendable, Hashable {
 
     /// Evaluates against a value. `nil` means "not present" (for example a missing key inside an object).
     public func evaluate(_ value: FactValue?) -> Outcome {
+        // Operators that handle a missing value themselves: `exists`, and the combinators and `path`, which pass it
+        // on to their children (so `any: [{ exists: false }, …]` works on a missing value).
         switch self {
         case .exists(let shouldExist):
             let present = value.map { !$0.isNull } ?? false
             return present == shouldExist
                 ? .pass
                 : .fail(shouldExist ? "value is missing" : "value is present (\(value!))")
+        case .all(let parts):
+            return Outcome.combineAll(parts.map { $0.evaluate(value) })
+        case .any(let parts):
+            return Outcome.combineAny(parts.map { $0.evaluate(value) })
+        case .at(let path, let inner):
+            switch inner.evaluate(value?.value(at: path)) {
+            case .pass: return .pass
+            case .fail(let r): return .fail("\(path): \(r)")
+            case .unknown(let r): return .unknown("\(path): \(r)")
+            }
         default:
             break
         }
-        guard let value else { return .fail("value is missing") }
+        // A value that isn't there is "can't tell", not "fails": Apple often omits a setting and uses its default.
+        // Only an explicit `exists` check (handled above) decides on absence.
+        guard let value else { return .unknown("value is not set") }
 
         switch self {
         case .equals(let expected):
@@ -98,10 +112,6 @@ public indirect enum Expectation: Sendable, Hashable {
         case .greaterThan(let limit):
             guard let n = value.number else { return .fail("expected a number, got \(value)") }
             return n > limit ? .pass : .fail("expected > \(limit), got \(value)")
-        case .all(let parts):
-            return Outcome.combineAll(parts.map { $0.evaluate(value) })
-        case .any(let parts):
-            return Outcome.combineAny(parts.map { $0.evaluate(value) })
         case .each(let inner):
             guard let items = value.array else { return .fail("expected a list, got \(value)") }
             let outcomes = items.enumerated().map { index, item -> Outcome in
@@ -112,25 +122,14 @@ public indirect enum Expectation: Sendable, Hashable {
                 }
             }
             return Outcome.combineAll(outcomes)
-        case .at(let path, let inner):
-            let nested = value.value(at: path)
-            // A key that isn't there is "can't tell", not "fails": Apple often omits a setting and uses its default.
-            // Only an explicit `exists` check decides on absence.
-            if nested == nil {
-                if case .exists = inner {} else { return .unknown("\(path) is not set") }
-            }
-            switch inner.evaluate(nested) {
-            case .pass: return .pass
-            case .fail(let r): return .fail("\(path): \(r)")
-            case .unknown(let r): return .unknown("\(path): \(r)")
-            }
-        case .exists:
+        case .exists, .all, .any, .at:
             return .pass  // handled above
         }
     }
 
     private static func fullMatch(_ pattern: String, _ s: String) -> Bool {
-        guard let re = try? NSRegularExpression(pattern: "^(?:\(pattern))$") else { return false }
+        // \A and \z: absolute start and end. `$` would also match before a trailing newline ("enabled\n").
+        guard let re = try? NSRegularExpression(pattern: "\\A(?:\(pattern))\\z") else { return false }
         return re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
     }
 }

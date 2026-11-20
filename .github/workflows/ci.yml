@@ -4,6 +4,7 @@ name: CI
 # without running twice.
 on:
   push:
+  pull_request:   # needed for pull requests from forks, which don't push to this repository
   workflow_dispatch:
 
 permissions:
@@ -17,6 +18,8 @@ jobs:
   # FarrierCore and the CLI are platform-independent so far, so a Linux job gives fast, cheap feedback.
   linux:
     name: Linux (Swift 6.1)
+    # Same-repository PRs are already covered by the push run; run on pull_request only for forks.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     container: swift:6.1
     timeout-minutes: 20
@@ -35,6 +38,7 @@ jobs:
   # The product target. Later PRs add the macOS-only collectors, helper and MCP server here.
   macos:
     name: macOS
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
