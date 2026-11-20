@@ -56,7 +56,7 @@ Prompt (V2, VM, password fallback). The icon is the generic "exec" icon with a l
 | E1 password fallback | ✅ on VM (V2) | no biometry enrolled, so the password prompt was used |
 | E2 policies (userPresence / biometryAny / biometryCurrentSet / none) | partial | `none` control on the VM: no prompt, `secondsInSign: 0` (324-byte blob, against 427 for userPresence). Biometry policies need Touch ID. |
 | E3 enrollment change | | |
-| E4 locked screen | ✅ signed after unlock (26.3 s) | where the prompt appeared: ? |
+| E4 locked screen | ✅ signed after unlock (26.3 s) | no prompt on the lock screen; it appeared after unlock |
 | E5 SSH session | | **prompt on console?** |
 | E6 started by Claude Code | | parent: |
 | E7 root signs with user key | ❌ as expected | the prompt appeared, juergen's password was not accepted, and the result was LAError -2. Prompted user: ? |
@@ -76,15 +76,22 @@ Prompt (V2, VM, password fallback). The icon is the generic "exec" icon with a l
 
 | Test | V2 | V3 | V5 | notes |
 |---|---|---|---|---|
-| C1 create, no dialogs | | | | |
-| C2 trusted binary: only the user-presence prompt | | | | |
-| C3 V1 (ad hoc) gets a keychain dialog; Deny gives an error | – | – | – | osstatus: |
-| C4 `security` tool gets a dialog | | | | |
-| C5 V2b (same team, other identifier) gets a dialog | | – | – | |
-| C6 Allow (once), then user-presence prompt, then signs | | | | |
+| C1 create, no dialogs | ✅ | | | |
+| C2 trusted binary: only the user-presence prompt | ✅ | | | 5.68 s; root verify `ok: true` |
+| C3 V1 (ad hoc) gets a keychain dialog; Deny gives an error | ✅ | – | – | osstatus **-128** (errSecUserCanceled) |
+| C4 `security` tool gets a dialog | ✅ | | | Deny: no output |
+| C5 V2b (same team, other identifier) gets a dialog | ✅ | – | – | -128 on Deny, so trust is per binary, not per team |
+| C6 Allow (once), then user-presence prompt, then signs | ✅ | | | keychain read 5.77 s (login keychain password), then signing 3.83 s: two gates |
 | C7 over SSH | | | | |
+| C9 still trusted after a code change and rebuild (updates) | | | | |
 
-Screenshot of the keychain dialog (C3):
+Keychain dialog (C3, V2 on the VM). C4 and C5 look the same, apart from the name:
+
+> **v1-adhoc wants to use your confidential information stored in "Farrier spike approval key (t1)" in your keychain.**
+> To allow this, enter the "login" keychain password.
+> [Always Allow] [Deny] [Allow]
+
+The caller is named by its **file name**. The item label (which we control) is shown in quotes.
 
 ## Findings
 
@@ -101,6 +108,18 @@ Options to evaluate:
   keychain** as a generic password, with an ACL that trusts only Farrier's designated requirement. No
   entitlement should be needed. Another process reading it triggers a keychain access prompt.
 - Accept the risk, and state it as residual risk in T-3.
+
+**F2: The keychain dialog names the caller by its file name, and offers "Always Allow".**
+An attacker's binary could be named `farrier`. The defence is that the genuine Farrier never triggers this dialog.
+So:
+- Name the real item so the warning is part of the dialog, for example
+  *"Farrier approval key — Farrier never asks for this. Click Deny."*
+- Say in the docs: any keychain dialog about this key is an attack.
+- Residual risk: a user who clicks "Always Allow" permanently adds the attacker's binary to the trust list.
+  Mitigation idea: Farrier checks the item's access list at startup (`SecKeychainItemCopyAccess`) and warns,
+  or recreates the key, if anything other than itself is trusted.
+
+**F3 (open):** updates must keep access. Test C9 checks this.
 
 ## Decision
 
