@@ -183,7 +183,8 @@ enum Tools {
     static func result(_ d: [String: Any], isError: Bool = false) -> CallTool.Result {
         let text = String(decoding: encodeJSON(d), as: UTF8.self)
         return .init(content: [.text(text: text, annotations: nil, _meta: nil)],
-                     structuredContent: toValue(d), isError: isError ? true : nil)
+                     // `as Value?` selects the non-throwing init; a bare Value matches the generic Codable one.
+                     structuredContent: toValue(d) as Value?, isError: isError ? true : nil)
     }
 }
 
