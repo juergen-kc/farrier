@@ -17,7 +17,7 @@ Fill this in while working through [CHECKLIST.md](CHECKLIST.md).
 
 | Test | Result | notes |
 |---|---|---|
-| M0 build (fixes needed?) | ✅ after 1 fix | `structuredContent: toValue(d)` resolved to the generic, throwing `init<Output: Codable>` (because `Value` is Codable). Passing `as Value?` selects the plain init. SPM resolved: swift-sdk 0.12.1, swift-log 1.17.2, swift-system 1.9.0, swift-nio 2.105.0, eventsource 1.6.0, swift-atomics 1.3.1, swift-collections 1.7.6. Swift-concurrency warnings: none beyond the known keychain deprecations. |
+| M0 build (fixes needed?) | ✅ after 1 fix | `structuredContent: toValue(d)` resolved to the generic, throwing `init<Output: Codable>` (because `Value` is Codable). Passing `as Value?` selects the plain init. SPM resolved: swift-sdk 0.12.1, swift-log 1.17.2, swift-system 1.9.0, swift-nio 2.105.0, eventsource 1.6.0, swift-atomics 1.3.1, swift-collections 1.7.6. Only the known keychain deprecation warnings appeared in the build output shown (the first build log was cut off at the error). |
 | M1 binary size: before / after | 5.2 MB after | spike-2 size before: not recorded |
 | M1b ping and approve still work | | |
 | M2 negotiation: asked 2026-07-28 → got | ✅ **2025-11-25** | The initialize reply carries capabilities (prompts, resources, tools; listChanged false), `instructions`, and serverInfo (name, title, version). tools/list returns all 5 tools with annotations, titles and the `outputSchema`. `initializeHook` sees the client's name, version and capabilities. |
