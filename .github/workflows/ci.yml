@@ -59,9 +59,19 @@ jobs:
       - name: Fail if any parser didn't recognise its output
         run: |
           swift run farrier facts --json > facts.json
-          if grep -q '"status" : "unparsed"' facts.json; then
-            echo "::error::a collector's output was not recognised (see the step above)"; exit 1
-          fi
+          # Every command-backed fact must actually be collected on a real Mac: an unparsed, failed or unavailable
+          # one would otherwise leave its parser untested while the job passes.
+          python3 - <<'PY'
+          import json, sys
+          notes = {n["fact"]: n for n in json.load(open("facts.json"))["notes"]}
+          required = ["os.version", "filevault.status", "sip.status", "gatekeeper.assessments",
+                      "firewall.globalState", "mdm.enrollment"]
+          bad = [f"{f}: {notes.get(f, {}).get('status', 'missing')} ({notes.get(f, {}).get('detail')})"
+                 for f in required if notes.get(f, {}).get("status") != "collected"]
+          bad += [f"{f}: unparsed ({n.get('detail')})" for f, n in notes.items() if n["status"] == "unparsed"]
+          for b in bad: print(f"::error::{b}")
+          sys.exit(1 if bad else 0)
+          PY
       # Assembles and ad hoc signs Farrier.app (CLI, helper, LaunchDaemon plist). A structure check only: an ad hoc
       # helper refuses to start, because it can't pin its clients without a Team ID.
       - name: Build Farrier.app (ad hoc)

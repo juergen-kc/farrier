@@ -15,12 +15,13 @@ public enum Parsers {
 
     /// `csrutil status` → "enabled" | "disabled" | "custom"
     public static func csrutilStatus(_ text: String) -> FactValue? {
-        if text.contains("Custom Configuration") || text.contains("status: unknown") { return .string("custom") }
-        guard let value = firstMatch(#"System Integrity Protection status:\s*(\w+)"#, in: text) else { return nil }
-        switch value.lowercased() {
+        // Only the explicit marker means custom. Any other unrecognised status stays unknown, never a guess.
+        if text.contains("(Custom Configuration)") { return .string("custom") }
+        guard let value = firstMatch(#"System Integrity Protection status:\s*(\w+)\."#, in: text) else { return nil }
+        switch value {
         case "enabled": return .string("enabled")
         case "disabled": return .string("disabled")
-        default: return .string("custom")
+        default: return nil
         }
     }
 
@@ -33,7 +34,7 @@ public enum Parsers {
 
     /// `socketfilterfw --getglobalstate` → "off" | "on" | "blockAll"
     public static func firewallGlobalState(_ text: String) -> FactValue? {
-        if let state = firstMatch(#"State\s*=\s*(\d)"#, in: text) {
+        if let state = firstMatch(#"State\s*=\s*(\d+)\)"#, in: text) {  // the whole number: State = 10 is not 1
             switch state {
             case "0": return .string("off")
             case "1": return .string("on")
@@ -65,14 +66,23 @@ public enum Parsers {
 
     /// `profiles status -type enrollment` → { dep, mdm, userApproved }
     public static func profilesEnrollment(_ text: String) -> FactValue? {
-        guard let dep = firstMatch(#"Enrolled via DEP:\s*(\w+)"#, in: text),
+        guard let dep = firstMatch(#"Enrolled via DEP:\s*(\S+)"#, in: text),
               let mdmLine = firstMatch(#"MDM enrollment:\s*(.+)"#, in: text) else { return nil }
-        let mdm = mdmLine.lowercased().hasPrefix("yes")
-        return .object([
-            "dep": .bool(dep.lowercased() == "yes"),
-            "mdm": .bool(mdm),
-            "userApproved": .bool(mdm && mdmLine.contains("User Approved")),
-        ])
+        // Only the known forms. Anything else ("Unknown", a new wording) is unparsed, not "not enrolled".
+        let depValue: Bool
+        switch dep {
+        case "Yes": depValue = true
+        case "No": depValue = false
+        default: return nil
+        }
+        let mdm: Bool, approved: Bool
+        switch mdmLine.trimmingCharacters(in: .whitespaces) {
+        case "No": (mdm, approved) = (false, false)
+        case "Yes": (mdm, approved) = (true, false)
+        case "Yes (User Approved)": (mdm, approved) = (true, true)
+        default: return nil
+        }
+        return .object(["dep": .bool(depValue), "mdm": .bool(mdm), "userApproved": .bool(approved)])
     }
 
     /// `profiles show -output stdout-xml` (as root) → sorted, unique payload types of the computer-level profiles.
