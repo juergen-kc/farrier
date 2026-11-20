@@ -147,10 +147,14 @@ item's access list, which invalidates later tests. Use **Deny**, or **Allow** (o
 - [ ] **C7 SSH:** if you do E5, also run `$S c-sign --label t1` over SSH. Record whether the keychain is
       reachable from an SSH session at all.
 - [ ] **C8 clean up:** `$S c-delete --label t1`
-- [ ] **C9 updates keep access:** with the current build, run `$S c-create --label t9 --pub /tmp/c-t9.pub`. Then make a
-      code change and rebuild: `echo "// rebuild test 2" >> Sources/se-spike/main.swift && ./scripts/build-variants.sh`.
-      Then run `$S c-sign --label t9 --out /tmp/c9.json`. Expect **no keychain dialog**. The access list should
-      match the signing identity (designated requirement), not the exact binary. Clean up with
+- [ ] **C9 updates keep access:**
+      1. `codesign -dvvv $S 2>&1 | grep CDHash= ; $S c-create --label t9 --pub /tmp/c-t9.pub`
+      2. Change real code, not just a comment (a comment can leave the binary unchanged):
+         `sed -i '' 's/usage: se-spike <command>/usage: se-spike (rebuilt) <command>/' Sources/se-spike/main.swift && ./scripts/build-variants.sh`
+      3. `codesign -dvvv $S 2>&1 | grep CDHash= ; $S c-sign --label t9 --out /tmp/c9.json`
+
+      The two CDHash values **must differ**. Expect **no keychain dialog**, because the access list should match the
+      signing identity (designated requirement), not the exact binary. Clean up with
       `$S c-delete --label t9 && git checkout Sources/`.
 
 ## 5. Clean up

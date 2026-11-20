@@ -83,7 +83,7 @@ Prompt (V2, VM, password fallback). The icon is the generic "exec" icon with a l
 | C5 V2b (same team, other identifier) gets a dialog | ✅ | – | – | -128 on Deny, so trust is per binary, not per team |
 | C6 Allow (once), then user-presence prompt, then signs | ✅ | | | keychain read 5.77 s (login keychain password), then signing 3.83 s: two gates |
 | C7 over SSH | | | | |
-| C9 still trusted after a code change and rebuild (updates) | | | | |
+| C9 still trusted after a code change and rebuild (updates) | ✅ | | | CDHash changed (08d9461b… to 50303002…); no keychain dialog, only the user-presence prompt (10.52 s). An earlier run with only a comment changed was inconclusive, because the binary may not have changed. |
 
 Keychain dialog (C3, V2 on the VM). C4 and C5 look the same, apart from the name:
 
@@ -119,7 +119,7 @@ So:
   Mitigation idea: Farrier checks the item's access list at startup (`SecKeychainItemCopyAccess`) and warns,
   or recreates the key, if anything other than itself is trusted.
 
-**F3 (open):** updates must keep access. Test C9 checks this.
+**F3 (resolved on V2):** updates keep access. After a real code change (new CDHash), the access list still matched, so it matches the signing identity (designated requirement), not the exact binary. To be repeated with Developer ID (V3/V5).
 
 ## Decision
 
