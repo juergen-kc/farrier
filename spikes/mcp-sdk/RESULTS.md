@@ -10,7 +10,7 @@ Fill this in while working through [CHECKLIST.md](CHECKLIST.md).
 | Mac model / VM | VirtualMac2,1 (macOS VM) |
 | macOS version | 27.2.1 (26B131) |
 | Swift version (`swift --version`) | Apple Swift 6.4.2 (Xcode, macOS 27.2 SDK) |
-| Claude Code version (`claude --version`) | |
+| Claude Code version (`claude --version`) | 2.1.329 (2.1.318 seen in an earlier connection) |
 | Claude Desktop version (optional) | |
 
 ## Build and protocol
@@ -29,8 +29,8 @@ Fill this in while working through [CHECKLIST.md](CHECKLIST.md).
 
 | Test | Result | notes |
 |---|---|---|
-| M4 connected, `/mcp` | | |
-| M5 version asked / got; client capabilities | | |
+| M4 connected, `/mcp` | ✅ | "Tools for farrier-spike, 5 tools". Each tool is labelled **read-only** or **destructive** from the annotations. The names shown are the **annotation titles** ("Process context", "Approve test plan"), not the tool `title` ("Spike: process context"). Note: `claude mcp add` without `--scope` registers the server only for the current folder (local scope); use `--scope user`. |
+| M5 version asked / got; client capabilities | ✅ **2025-11-25 / 2025-11-25** | Claude Code **itself requests 2025-11-25**, so there's no version gap with this SDK in practice. Raw capabilities: `roots {listChanged: true}` and `elicitation {form, url}`. **No `sampling`, no `tasks`.** clientInfo: name `claude-code`, title "Claude Code", version 2.1.329. |
 | M6 read-only tool: permission asked? result shown how? | | process chain: |
 | M7 destructive tool: permission wording | | |
 | M7 prompt appeared (screenshot) | | |
