@@ -38,6 +38,9 @@ Done:
 - [x] Unprivileged (T0) collectors: OS version, FileVault, SIP, Gatekeeper, firewall, MDM enrollment, software
       update settings; `farrier facts`, live `farrier posture`; golden parser tests; CI runs collection on a real
       macOS runner (docs/FACTS.md)
+- [x] Privileged helper, first cut: `Farrier.app` packaging (`scripts/build-app.sh`), SMAppService registration
+      (`farrier helper register|status|unregister`), mutual code-signing pinning, console-session check, version
+      handshake and idle exit, and the first T1 fact (`mdm.payloadTypes`)
 
 To do:
 - Helper lifecycle: a version handshake (a mismatched helper exits after replying) and an idle exit

@@ -61,6 +61,40 @@ struct ParserTests {
         #expect(managed.value(at: "userApproved") == .bool(true))
     }
 
+    @Test func profilePayloadTypes() throws {
+        // Structure of `profiles show -output stdout-xml` as root: computer-level profiles under _computerlevel,
+        // each with ProfileItems carrying a PayloadType.
+        let xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <plist version="1.0"><dict>
+              <key>_computerlevel</key>
+              <array>
+                <dict>
+                  <key>ProfileIdentifier</key><string>com.jumpcloud.mdm.security</string>
+                  <key>ProfileItems</key>
+                  <array>
+                    <dict><key>PayloadType</key><string>com.apple.security.firewall</string></dict>
+                    <dict><key>PayloadType</key><string>com.apple.MCX.FileVault2</string></dict>
+                  </array>
+                </dict>
+                <dict>
+                  <key>ProfileItems</key>
+                  <array><dict><key>PayloadType</key><string>com.apple.security.firewall</string></dict></array>
+                </dict>
+              </array>
+            </dict></plist>
+            """
+        let v = try #require(Parsers.profilePayloadTypes(Data(xml.utf8)))
+        #expect(v == .array([.string("com.apple.MCX.FileVault2"), .string("com.apple.security.firewall")]))  // sorted, unique
+        // No profiles: profiles prints a sentence, which means an empty list (known), not unknown.
+        #expect(Parsers.profilePayloadTypes(Data("There are no configuration profiles installed\n".utf8)) == .array([]))
+        // Only user-level profiles: no _computerlevel key → empty.
+        let userOnly = #"<?xml version="1.0"?><plist version="1.0"><dict><key>_user</key><array/></dict></plist>"#
+        #expect(Parsers.profilePayloadTypes(Data(userOnly.utf8)) == .array([]))
+        // Anything else stays unknown.
+        #expect(Parsers.profilePayloadTypes(Data("profiles: this command requires root\n".utf8)) == nil)
+    }
+
     @Test func unrecognisedOutputIsNil() {
         // Never guess: an unknown output must make the fact unknown, not pass or fail.
         #expect(Parsers.fdesetupStatus("something new") == nil)

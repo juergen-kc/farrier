@@ -1,9 +1,10 @@
 // swift-tools-version:6.1
 // Farrier: see README.md and docs/ARCHITECTURE.md.
 //
-// v0.1 foundation: the platform-independent core (rule packs, linting, posture evaluation) and the CLI.
-// macOS collectors, the privileged helper and the MCP server come in later PRs as separate targets, so
-// FarrierCore stays buildable and testable on Linux in CI.
+// FarrierCore is platform-independent (rule packs, posture, collectors and parsers) and tested on Linux in CI.
+// FarrierHelperKit and farrier-helper are the privileged helper's shared code and daemon: their macOS parts are
+// behind `#if os(macOS)`, so the whole package still builds on Linux. They use the Swift 5 language mode because
+// NSXPC and its reply blocks predate Swift 6 strict concurrency; FarrierCore and the CLI use Swift 6.
 import PackageDescription
 
 let package = Package(
@@ -22,16 +23,27 @@ let package = Package(
             name: "FarrierCore",
             dependencies: [.product(name: "Yams", package: "Yams")]
         ),
+        .target(
+            name: "FarrierHelperKit",
+            dependencies: ["FarrierCore"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .executableTarget(
             name: "farrier",
             dependencies: [
                 "FarrierCore",
+                "FarrierHelperKit",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
         ),
+        .executableTarget(
+            name: "farrier-helper",
+            dependencies: ["FarrierCore", "FarrierHelperKit"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .testTarget(
             name: "FarrierCoreTests",
-            dependencies: ["FarrierCore"]
+            dependencies: ["FarrierCore", "FarrierHelperKit"]
         ),
     ],
     swiftLanguageModes: [.v6]

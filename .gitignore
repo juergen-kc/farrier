@@ -1,8 +1,8 @@
+*.dSYM/
+*.xcodeproj/xcuserdata/
+.DS_Store
 .build/
 .swiftpm/
-*.xcodeproj/xcuserdata/
 DerivedData/
 build/
 dist/
-*.dSYM/
-.DS_Store

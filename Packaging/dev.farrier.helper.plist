@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- LaunchDaemon registered by SMAppService.daemon(plistName:). Shipped in
+     Farrier.app/Contents/Library/LaunchDaemons/. launchd pins the helper's identifier and Team ID. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.farrier.helper</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/farrier-helper</string>
+	<key>MachServices</key>
+	<dict>
+		<key>dev.farrier.helper</key>
+		<true/>
+	</dict>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>dev.farrier.app</string>
+	</array>
+	<key>StandardErrorPath</key>
+	<string>/Library/Logs/farrier-helper.log</string>
+</dict>
+</plist>

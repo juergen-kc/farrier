@@ -75,6 +75,25 @@ public enum Parsers {
         ])
     }
 
+    /// `profiles show -output stdout-xml` (as root) → sorted, unique payload types of the computer-level profiles.
+    /// With no profiles installed, `profiles` prints a sentence instead of a plist; that's an empty list, not unknown.
+    public static func profilePayloadTypes(_ output: Data) -> FactValue? {
+        let text = String(decoding: output, as: UTF8.self)
+        if text.contains("There are no configuration profiles installed") { return .array([]) }
+        guard let start = text.range(of: "<?xml") ?? text.range(of: "<plist"),
+              let root = propertyList(Data(text[start.lowerBound...].utf8))?.object else { return nil }
+        guard let profiles = root["_computerlevel"] else { return .array([]) }  // only user-level profiles
+        guard let list = profiles.array else { return nil }
+        var types = Set<String>()
+        for profile in list {
+            guard let items = profile.object?["ProfileItems"]?.array else { continue }
+            for item in items {
+                if let t = item.object?["PayloadType"]?.string { types.insert(t) }
+            }
+        }
+        return .array(types.sorted().map(FactValue.string))
+    }
+
     /// A property list (XML or binary) → object. Dates become ISO 8601 strings, data becomes base64.
     public static func propertyList(_ data: Data) -> FactValue? {
         guard let value = try? PropertyListDecoder().decode(FactValue.self, from: data), value.object != nil else { return nil }

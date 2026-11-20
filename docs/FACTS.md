@@ -26,11 +26,19 @@ Rules of the road:
 | `softwareupdate.prefs` | `/Library/Preferences/com.apple.SoftwareUpdate.plist`, overridden by `/Library/Managed Preferences/com.apple.SoftwareUpdate.plist` | `{ AutomaticCheckEnabled, AutomaticDownload, CriticalUpdateInstall, ConfigDataInstall, AutomaticallyInstallMacOSUpdates, AutomaticallyInstallAppUpdates }`; only the keys that are set |
 | `softwareupdate.managedKeys` | the managed preferences above | the keys a profile sets |
 
-## T1: planned, via the helper
+## T1: via the privileged helper
+
+Collected when `farrier` runs from `Farrier.app`, the helper is enabled (`farrier helper register`), and the
+caller is in the console session. Otherwise `farrier facts` lists them as `unavailable`, with the reason.
+
+| Fact | Source (run by the helper as root) | Values |
+|---|---|---|
+| `mdm.payloadTypes` | `/usr/bin/profiles show -output stdout-xml` | sorted, unique `PayloadType`s of the computer-level profiles; `[]` when none are installed |
+
+### Planned
 
 | Fact | Why privileged | Used by |
 |---|---|---|
-| `mdm.payloadTypes` | the computer-level profiles need root | managed-setting detection |
 | `mdm.declarationTypes` | Declarative Device Management state needs root | managed-setting detection |
 | `launchd.items` | full launchd plists, signature and notarization checks across `/Library` | `posture.core.unsigned-launch-items` |
 | `tcc.grants` | `TCC.db` needs Full Disk Access | inventory, posture |

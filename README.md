@@ -74,6 +74,20 @@ swift run farrier posture
 swift run farrier rules lint rules
 ```
 
+**The privileged helper** (for facts that need root, and later for fixes) only works from a signed `Farrier.app`:
+
+```bash
+SIGN_IDENTITY="Apple Development: …" ./scripts/build-app.sh
+```
+
+```bash
+sudo rm -rf /Applications/Farrier.app && sudo ditto build/Farrier.app /Applications/Farrier.app && sudo chown -R root:wheel /Applications/Farrier.app
+```
+
+```bash
+/Applications/Farrier.app/Contents/MacOS/farrier helper register
+```
+
 `farrier facts` and `farrier posture` read this Mac's settings without privileges. Facts that need the helper show
 as unknown for now (see [docs/FACTS.md](docs/FACTS.md)). On Linux, or to test rules, use
 `swift run farrier posture --facts examples/facts-sample.json`.

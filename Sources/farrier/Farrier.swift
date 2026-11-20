@@ -1,17 +1,18 @@
 import ArgumentParser
 import FarrierCore
+import FarrierHelperKit
 import Foundation
 
 @main
 struct Farrier: ParsableCommand {
-    static let version = "0.1.0-dev"
+    static let version = FarrierVersion.string
 
     static let configuration = CommandConfiguration(
         commandName: "farrier",
         abstract: "Keep your Mac sound: hygiene, posture, drift, patching and debugging.",
         discussion: "v0.1: rule packs, unprivileged fact collection and posture evaluation. The privileged helper and the MCP server follow.",
         version: version,
-        subcommands: [Posture.self, Facts.self, Rules.self]
+        subcommands: [Posture.self, Facts.self, Rules.self, Helper.self]
     )
 }
 
@@ -105,7 +106,7 @@ struct Posture: ParsableCommand {
         if let facts {
             store = try StaticFactStore(json: Data(contentsOf: URL(fileURLWithPath: facts)))
         } else {
-            store = StaticFactStore(SystemCollectors().collect())
+            store = StaticFactStore(collectAllFacts())
         }
         let report = PostureEngine.evaluate(packs, facts: store)
 
@@ -147,7 +148,7 @@ struct Facts: ParsableCommand {
     var save: String?
 
     func run() throws {
-        let result = SystemCollectors().collect()
+        let result = collectAllFacts()
         if let save {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -169,6 +170,101 @@ struct Facts: ParsableCommand {
 struct FactsReport: Encodable {
     let facts: [String: FactValue]
     let notes: [CollectionNote]
+}
+
+/// T0 facts from the collectors, plus T1 facts from the privileged helper when it's available (macOS, running
+/// from Farrier.app, helper enabled, console session). Without the helper, T1 facts are noted as unavailable.
+func collectAllFacts() -> CollectionResult {
+    let base = SystemCollectors().collect()
+    #if os(macOS)
+    return base.merging(HelperClient.collectPrivilegedFacts())
+    #else
+    return base
+    #endif
+}
+
+// MARK: - farrier helper
+
+struct Helper: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Manage and check the privileged helper (macOS, from Farrier.app only).",
+        subcommands: [Status.self, Register.self, Unregister.self, Ping.self, WhoAmI.self]
+    )
+
+    static func macOnly() throws {
+        #if !os(macOS)
+        FileHandle.standardError.write(Data("the privileged helper exists only on macOS\n".utf8))
+        throw ExitCode(2)
+        #endif
+    }
+
+    struct Status: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Show the helper's registration status.")
+        func run() throws {
+            try Helper.macOnly()
+            #if os(macOS)
+            print("helper: \(HelperClient.status)")
+            #endif
+        }
+    }
+
+    struct Register: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Register the helper (macOS then asks you to approve it).")
+        func run() throws {
+            try Helper.macOnly()
+            #if os(macOS)
+            let (status, message) = HelperClient.register()
+            print("helper: \(status)")
+            if let message { print(message) }
+            #endif
+        }
+    }
+
+    struct Unregister: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Unregister the helper.")
+        func run() throws {
+            try Helper.macOnly()
+            #if os(macOS)
+            let (status, message) = HelperClient.unregister()
+            print("helper: \(status)")
+            if let message { print(message) }
+            #endif
+        }
+    }
+
+    struct Ping: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Talk to the helper: its version, and whether it runs as root.")
+        func run() throws {
+            try Helper.macOnly()
+            #if os(macOS)
+            do {
+                let info = try HelperClient.hello()
+                print("helper \(info.version) (protocol \(info.protocolVersion)), pid \(info.pid), euid \(info.euid)")
+                if info.willExit { print("version differs from this farrier (\(FarrierVersion.string)): the helper restarts on the next call") }
+            } catch {
+                FileHandle.standardError.write(Data("\(error)\n".utf8))
+                throw ExitCode(1)
+            }
+            #endif
+        }
+    }
+
+    struct WhoAmI: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "How the helper sees this caller (console-session check).")
+        func run() throws {
+            try Helper.macOnly()
+            #if os(macOS)
+            do {
+                let d = try HelperClient.whoAmI()
+                print("accepted: \(d.accepted)  uid \(d.callerEUID)  console user \(d.consoleUser)  session \(d.sessionBits)")
+                for r in d.reasons { print("  - \(r)") }
+            } catch {
+                FileHandle.standardError.write(Data("\(error)\n".utf8))
+                throw ExitCode(1)
+            }
+            #endif
+        }
+    }
 }
 
 // MARK: - Output
