@@ -45,10 +45,11 @@ F=/Applications/FarrierSpike.app/Contents/MacOS/farrier-spike; W=~/Library/Logs/
 
 ## 1. Protocol by hand (no AI client)
 
-- [ ] **M2 negotiation:** send an `initialize` asking for `2026-07-28`, then `tools/list`:
+- [ ] **M2 negotiation:** send an `initialize` asking for `2026-07-28`, then `tools/list`. Keep stdin open for a moment
+      with `sleep 3`. Without it, the server stops at end-of-input before replying (see M2b in RESULTS.md):
 
 ```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"manual","version":"0"}}}' '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | $F mcp
+( printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"manual","version":"0"}}}' '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'; sleep 3 ) | $F mcp
 ```
 
   Expect a reply with `"protocolVersion":"2025-11-25"` (the fallback), then the 5 tools. Record whether the
@@ -57,7 +58,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol
 - [ ] **M3 stdout hygiene:** run the same command, piped into a JSON check. Expect no `BAD` lines:
 
 ```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"manual","version":"0"}}}' '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"system_info","arguments":{}}}' | $F mcp | while IFS= read -r l; do echo "$l" | python3 -m json.tool >/dev/null 2>&1 || echo "BAD: $l"; done; echo checked
+( printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"manual","version":"0"}}}' '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"system_info","arguments":{}}}'; sleep 3 ) | $F mcp | while IFS= read -r l; do echo "$l" | python3 -m json.tool >/dev/null 2>&1 || echo "BAD: $l"; done; echo checked
 ```
 
 - [ ] **M3b wire log:** `tail -5 $W` shows the messages in both directions.

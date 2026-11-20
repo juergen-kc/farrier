@@ -6,10 +6,10 @@ Fill this in while working through [CHECKLIST.md](CHECKLIST.md).
 
 | | |
 |---|---|
-| Date | |
-| Mac model / VM | |
-| macOS version | |
-| Swift version (`swift --version`) | |
+| Date | 2026-11-20 |
+| Mac model / VM | VirtualMac2,1 (macOS VM) |
+| macOS version | 27.2.1 (26B131) |
+| Swift version (`swift --version`) | Apple Swift 6.4.2 (Xcode, macOS 27.2 SDK) |
 | Claude Code version (`claude --version`) | |
 | Claude Desktop version (optional) | |
 
@@ -17,10 +17,11 @@ Fill this in while working through [CHECKLIST.md](CHECKLIST.md).
 
 | Test | Result | notes |
 |---|---|---|
-| M0 build (fixes needed?) | | |
-| M1 binary size: before / after | | |
+| M0 build (fixes needed?) | ✅ after 1 fix | `structuredContent: toValue(d)` resolved to the generic, throwing `init<Output: Codable>` (because `Value` is Codable). Passing `as Value?` selects the plain init. SPM resolved: swift-sdk 0.12.1, swift-log 1.17.2, swift-system 1.9.0, swift-nio 2.105.0, eventsource 1.6.0, swift-atomics 1.3.1, swift-collections 1.7.6. Swift-concurrency warnings: none beyond the known keychain deprecations. |
+| M1 binary size: before / after | 5.2 MB after | spike-2 size before: not recorded |
 | M1b ping and approve still work | | |
-| M2 negotiation: asked 2026-07-28 → got | | |
+| M2 negotiation: asked 2026-07-28 → got | ✅ **2025-11-25** | The initialize reply carries capabilities (prompts, resources, tools; listChanged false), `instructions`, and serverInfo (name, title, version). tools/list returns all 5 tools with annotations, titles and the `outputSchema`. `initializeHook` sees the client's name, version and capabilities. |
+| M2b stdin closed immediately | ⚠️ **no output** | When `printf` closes stdin right after the requests, the SDK's message loop ends at end-of-input (`-- stopped` is logged **before** the initialize hook runs), `waitUntilCompleted()` returns, and `exit(0)` ends the process before any reply is written. With stdin held open (`( printf …; sleep 3 ) \| $F mcp`), both replies arrive and `exit=0`. **Product:** after `waitUntilCompleted()`, allow a short grace period, or wait for in-flight handlers, before exiting. Real clients keep stdin open, so the impact is low. |
 | M3 stdout hygiene | | |
 | M3b wire log | | |
 
