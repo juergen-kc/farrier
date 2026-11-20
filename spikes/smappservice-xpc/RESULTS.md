@@ -46,7 +46,7 @@ What the user sees (X2):
 |---|---|---|---|---|---|
 | X11 local | ✅ true | 0x6030 | yes | no | `sessionGetInfoStatus: 0`: **SessionGetInfo works from root for another process's session.** asid 100013, consoleUser juergen. Bits 0x6030 = graphic (0x10) + TTY (0x20) + 0x2000 (presumably console access) + 0x4000 (presumably authenticated) |
 | X12 sudo | ✅ false | 0x6030 | yes | no | refused: "caller euid 0 is not the console user". **sudo keeps the same audit session (asid 100013)**, so the session bits alone would accept it. The euid check is essential. |
-| X13 SSH | | | | | |
+| X13 SSH | ✅ **false** | 0x5020 | **no** | **yes** | different audit session (asid **100636** vs 100013 in the console). Reasons: "session has no graphics access" and "session is remote". **SessionGetInfo + console-user check reliably distinguish SSH from the console session (F4).** |
 | X14 Claude Code | | | | | |
 
 ## 4. Enrollment
@@ -58,7 +58,7 @@ What the user sees (X2):
 | X17 enroll: admin dialog | | dialog names: ; loading the key prompted? |
 | X18 key file root:wheel 0644 | | |
 | X19 cancel → refused | | authStatus: |
-| X20 SSH enroll refused before dialog | | |
+| X20 SSH enroll refused before dialog | ✅ (earlier) | didn't reach the helper: keychain read failed with -25300 (item not found, since the key wasn't created yet). With the key present, the keychain blocks SSH with -25308 (first spike, C7). Nothing appeared on screen. |
 | X21 authorizationdb rule | | |
 
 ## 5. Approval round trip
@@ -69,7 +69,7 @@ What the user sees (X2):
 | X23 replay refused | | |
 | X24 tamper refused | | |
 | X25 expiry refused | | expired / unknown nonce: |
-| X26 SSH approve refused | | |
+| X26 SSH approve refused | ✅ | the helper refused at `beginApproval`: "caller is not in the console session" (bits 0x5020, remote). Refused before any signing, so no prompt is possible. |
 | X27 attacker rejected | | |
 
 ## 6. Integrity check
