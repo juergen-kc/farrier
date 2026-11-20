@@ -33,12 +33,12 @@ Fill this in while working through [CHECKLIST.md](CHECKLIST.md). Pasting the JSO
 |---|---|---|---|---|---|
 | A1 create, no prompt | | ✅ | | | 427-byte key blob |
 | A2 sign, prompt appears | | ✅ (password) | | | `secondsInSign` 8.55. Prompt shows name: ? |
-| A3 verify as user | | (covered by A4) | | | |
+| A3 verify as user | | ✅ | | | the user-run verify in A8 showed `signatureValid: true` |
 | A4 verify as root | | ✅ | | | `euid: 0`, `signatureValid: true`, `fingerprintMatches: true` |
-| A5 tamper detected | | | | | |
-| A6 prompts on every signature | | | | | |
-| A7 cancel error (domain/code) | | | | | |
-| A8 expiry detected | | | | | |
+| A5 tamper detected | | ✅ | | | `signatureValid: false` |
+| A6 prompts on every signature | | ✅ | | | two signatures back to back: 4.79 s and 3.95 s |
+| A7 cancel error (domain/code) | | ❓ | | | first run returned `ok: true` (3.28 s), so it was approved, not cancelled. Re-run pending. |
+| A8 expiry detected | | ✅ | | | ttl 5 s, verified after 6 s: `signatureValid: true`, `expired: true`, `ok: false` |
 
 Screenshot of the prompt:
 
@@ -47,7 +47,7 @@ Screenshot of the prompt:
 | Test | Result | notes |
 |---|---|---|
 | E1 password fallback | ✅ on VM (V2) | no biometry enrolled, so the password prompt was used |
-| E2 policies (userPresence / biometryAny / biometryCurrentSet / none) | | |
+| E2 policies (userPresence / biometryAny / biometryCurrentSet / none) | partial | `none` control on the VM: no prompt, `secondsInSign: 0` (324-byte blob, against 427 for userPresence). Biometry policies need Touch ID. |
 | E3 enrollment change | | |
 | E4 locked screen | | |
 | E5 SSH session | | **prompt on console?** |
