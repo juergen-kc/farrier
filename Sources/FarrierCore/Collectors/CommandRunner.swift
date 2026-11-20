@@ -39,8 +39,8 @@ public struct ProcessRunner: CommandRunning {
         let id = UUID().uuidString
         let outURL = tmp.appendingPathComponent("farrier-\(id).out")
         let errURL = tmp.appendingPathComponent("farrier-\(id).err")
-        FileManager.default.createFile(atPath: outURL.path, contents: nil)
-        FileManager.default.createFile(atPath: errURL.path, contents: nil)
+        _ = FileManager.default.createFile(atPath: outURL.path, contents: nil)
+        _ = FileManager.default.createFile(atPath: errURL.path, contents: nil)
         defer {
             try? FileManager.default.removeItem(at: outURL)
             try? FileManager.default.removeItem(at: errURL)
