@@ -67,6 +67,27 @@ FDA held by (record per state): Terminal / Claude / FarrierSpike
 
 So far: **root does not bypass TCC.** Without its own grant, the helper is denied every FDA location. The CLI and the MCP server read everything because an app higher in their process chain (Terminal) holds FDA. Note: `sshd-keygen-wrapper` with FDA means SSH sessions also get Full Disk Access on this machine.
 
+**State B (FDA on: FarrierSpike, Claude desktop app; off: Terminal). The decisive run:**
+
+| Probe | TCC.db | Safari | Mail | Messages | Caches |
+|---|---|---|---|---|---|
+| CLI from Terminal | ❌ EPERM | ❌ EPERM | ❌ EPERM | ❌ EPERM | ✅ |
+| helper (root, launchd) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| MCP server via Claude Code | ❌ EPERM (Cocoa 513) | ❌ EPERM (Cocoa 257) | ❌ EPERM (257) | ❌ EPERM (257) | ✅ |
+| helper via Claude Code | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+**Conclusions (states B and C):**
+1. **FDA granted to `FarrierSpike.app` covers the helper**, the root LaunchDaemon in the bundle, started by launchd.
+2. **The same grant does not cover the CLI or the MCP server.** TCC attributes them to the app at the top of their process
+   chain (Terminal here; Claude Desktop, iTerm etc. elsewhere), so their access depends on how the user launched them.
+3. **Design consequence:** every TCC-protected read goes through the helper (`readPrivileged`, tier T1). The user grants
+   Full Disk Access once, to Farrier.app. The CLI and MCP server never rely on the terminal's grants.
+4. Root alone does not bypass TCC (baseline: helper denied without a grant).
+5. Detail: a TCC denial surfaces as different Cocoa codes (513 for a file, 257 for a directory), with the same
+   underlying `NSPOSIXErrorDomain 1` (EPERM). Check the underlying error.
+
+State A (no grants, control): not run yet; expected all denied except Caches.
+
 M14 user-folder dialog names:
 
 ## Claude Desktop (optional)
@@ -80,7 +101,7 @@ M14 user-folder dialog names:
 - SDK suitable for v0.1: [ ] yes / [ ] with workarounds / [ ] no
 - Protocol version gap (2025-11-25 vs 2026-07-28): impact:
 - Annotations honoured by Claude Code:
-- Privileged reads must go through: [ ] the CLI's own FDA / [ ] the helper
+- Privileged reads must go through: [ ] the CLI's own FDA / [x] **the helper** (FDA granted to the app bundle applies to the helper only)
 - Long operations:
 
 ARCHITECTURE.md and THREAT_MODEL.md updated: [ ]
