@@ -31,9 +31,9 @@ Fill this in while working through [CHECKLIST.md](CHECKLIST.md).
 |---|---|---|
 | M4 connected, `/mcp` | ✅ | "Tools for farrier-spike, 5 tools". Each tool is labelled **read-only** or **destructive** from the annotations. The names shown are the **annotation titles** ("Process context", "Approve test plan"), not the tool `title` ("Spike: process context"). Note: `claude mcp add` without `--scope` registers the server only for the current folder (local scope); use `--scope user`. |
 | M5 version asked / got; client capabilities | ✅ **2025-11-25 / 2025-11-25** | Claude Code **itself requests 2025-11-25**, so there's no version gap with this SDK in practice. Raw capabilities: `roots {listChanged: true}` and `elicitation {form, url}`. **No `sampling`, no `tasks`.** clientInfo: name `claude-code`, title "Claude Code", version 2.1.329. |
-| M6 read-only tool: permission asked? result shown how? | | process chain: |
+| M6 read-only tool: permission asked? result shown how? | ✅ (permission prompt: ?) | Claude summarised the structured result as a table. Process chain: **`farrier-spike` (21179) → `claude` (21131) → `-zsh` → `login` → `Terminal.app`**. The top app is Terminal, so TCC most likely checks Terminal, not FarrierSpike (see section 3). `sshSession: false`. |
 | M7 destructive tool: permission wording | | |
-| M7 prompt appeared (screenshot) | | |
+| M7 prompt appeared (screenshot) | ✅ | approved on the Mac about 6 s after the request. `begin` ok (nonce, ttl 60), then `submit` approved, `approved: true`. The agent reported that it could start the approval but not grant it. |
 | M7 waiting about 60 s before approving | | |
 | M7 cancel → reported how | | |
 | M8 helper_whoami via the agent | | asid vs Terminal: |
