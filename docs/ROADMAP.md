@@ -49,7 +49,14 @@ Done:
       (`farrier plan posture|show|list`), the Secure Enclave approval key in the login keychain with the
       access-list integrity check (`farrier setup [--rotate]`), admin-authorized enrollment, one-time nonces, the
       helper's `applyPlan` (verifies and applies in one call, re-checks MDM ownership and the current state), and
-      hash-chained user and helper journals (`farrier journal verify|show`). Not yet validated on a Mac.
+      hash-chained user and helper journals (`farrier journal verify|show`). **Validated** on a macOS 27.2.1 VM
+      (Apple Development signing, no Touch ID): `setup` showed the admin dialog and enrolled the key, and a second
+      run changed nothing; the plan held only the firewall, with FileVault and launch items left out and why;
+      `apply` showed the password prompt with text derived from the plan ("Farrier is trying to apply Farrier plan
+      c0d6f594 (T4): Turn on the application firewall") and turned the firewall on (verified by reading it back);
+      applying again reported `alreadyCompliant`; over SSH, apply was refused at the first helper call, before any
+      prompt; both journals verified intact. Not yet tested: cancelling the prompt, the integrity check after
+      "Always Allow", an MDM-managed firewall.
 
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
