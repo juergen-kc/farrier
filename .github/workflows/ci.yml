@@ -46,3 +46,15 @@ jobs:
       - run: swift test
       - name: Lint the bundled rule packs
         run: swift run farrier rules lint rules
+      # Real collection on the runner: checks the parsers against genuine macOS output. An `unparsed` note here
+      # means a parser needs a new golden case.
+      - name: Collect facts on the runner
+        run: swift run farrier facts
+      - name: Live posture on the runner
+        run: swift run farrier posture
+      - name: Fail if any parser didn't recognise its output
+        run: |
+          swift run farrier facts --json > facts.json
+          if grep -q '"status" : "unparsed"' facts.json; then
+            echo "::error::a collector's output was not recognised (see the step above)"; exit 1
+          fi
