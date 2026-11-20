@@ -22,6 +22,10 @@ usage: farrier-spike <command> [options]
   approve [--tamper] [--replay] [--delay SECONDS]
                              full approval round trip: nonce, Touch ID or password, helper verification
   reset                      remove the enrolled key from the helper (admin authorization)
+
+  tcc-probe [--user-folders] try to read TCC-protected locations from this process
+  helper-tcc-probe           the same probe, run by the root helper
+  mcp                        run as a stdio MCP server (MCP SDK spike)
 """
 
 var args = Array(CommandLine.arguments.dropFirst())
@@ -83,28 +87,24 @@ do {
         finish("reset", Helper.call(expectID: expectID) { h, r in h.reset(authorization: auth, reply: r) })
 
     case "approve":
-        // A random hash stands in for the SHA-256 of a real plan.
-        let planHash = Data.random(32)
-        let begin = Helper.call(expectID: expectID) { h, r in h.beginApproval(planHash: planHash, reply: r) }
-        printJSON("begin", begin)
-        guard begin["ok"] as? Bool == true,
-              let nonce = (begin["nonce"] as? String).flatMap({ Data(hex: $0) }),
-              let exp = (begin["expiresAt"] as? NSNumber)?.int64Value else { exit(1) }
+        let steps = Approval.run(expectID: expectID, tamper: flag("tamper"), replay: flag("replay"),
+                                 delay: opt("delay").flatMap { UInt32($0) })
+        for (name, d) in steps { printJSON(name, d) }
+        exit(steps.last(where: { $0.0 == "submit" })?.1["ok"] as? Bool == true ? 0 : 1)
 
-        let payload = ApprovalPayload.build(planHash: planHash, nonce: nonce, expiresAt: exp)
-        // The prompt text is derived from the plan inside Farrier, never taken from arguments.
-        let reason = "approve Farrier plan \(planHash.prefix(4).hex)…: 3 items, 1.2 GB, irreversible"
-        var signature = try Keychain.sign(payload, reason: reason)
-        if flag("tamper") { signature[signature.index(before: signature.endIndex)] ^= 0x01 }
-        if let delay = opt("delay").flatMap({ UInt32($0) }) { sleep(delay) }
+    case "tcc-probe":
+        // The same probe as the MCP tool, run directly from the CLI (Terminal is the responsible process here).
+        finish("tcc-probe", ["ok": true, "results": TCCProbe.run(home: NSHomeDirectory(), includeUserFolders: flag("user-folders"))])
 
-        let submit = Helper.call(expectID: expectID) { h, r in h.submitApproval(payload: payload, signature: signature, reply: r) }
-        printJSON("submit", submit)
-        if flag("replay") {
-            let again = Helper.call(expectID: expectID) { h, r in h.submitApproval(payload: payload, signature: signature, reply: r) }
-            printJSON("replay", again)
-        }
-        exit(submit["ok"] as? Bool == true ? 0 : 1)
+    case "helper-tcc-probe":
+        finish("helper-tcc-probe", Helper.call(expectID: expectID) { h, r in
+            h.tccProbe(home: NSHomeDirectory(), reply: r)
+        })
+
+    case "mcp":
+        // stdio MCP server. Nothing else may write to stdout in this mode.
+        try await FarrierMCP.run()
+        exit(0)
 
     default:
         print(usage)

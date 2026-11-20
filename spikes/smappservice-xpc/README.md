@@ -22,6 +22,10 @@ The second v0.0 spike. It builds a minimal version of Farrier's trust boundary a
 6. **The access-list integrity check (finding F2).** Can Farrier read its key item's access list and detect an
    extra trusted application (for example, after someone clicked "Always Allow")?
 
+> **Also hosts the MCP SDK spike.** Since then, the client also has an `mcp` command (stdio MCP server, using the
+> Swift MCP SDK), `tcc-probe` and `helper-tcc-probe`, and the helper has a `tccProbe` verb. See
+> [`../mcp-sdk`](../mcp-sdk/). The package now needs a Swift 6.1+ toolchain and network access on the first build.
+
 ## Layout
 
 ```
@@ -31,6 +35,8 @@ Sources/farrier-spike/                 client CLI (the app's main executable)
   main.swift                           commands
   Helper.swift                         XPC client (pins the helper), SMAppService, client authorization
   Keychain.swift                       approval key (Approach C) and access-list dump
+  Approval.swift                       approval round trip (shared by CLI and MCP)
+  MCPServer.swift                      `mcp` command: tools, resource, prompt, wire log (MCP SDK spike)
 Sources/farrier-spike-helper/          root LaunchDaemon
   main.swift                           NSXPCListener, client pinning
   HelperService.swift                  verbs: ping, whoAmI, enroll, beginApproval, submitApproval, reset

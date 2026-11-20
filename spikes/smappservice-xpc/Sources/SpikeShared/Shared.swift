@@ -33,6 +33,8 @@ public enum Spike {
     func submitApproval(payload: Data, signature: Data, reply: @escaping (Data) -> Void)
     /// Removes the enrolled key. Needs admin authorization.
     func reset(authorization: Data, reply: @escaping (Data) -> Void)
+    /// Runs the TCC probe as the root helper (MCP SDK spike, test M7). `home` is the caller's home directory.
+    func tccProbe(home: String, reply: @escaping (Data) -> Void)
 }
 
 // MARK: - JSON

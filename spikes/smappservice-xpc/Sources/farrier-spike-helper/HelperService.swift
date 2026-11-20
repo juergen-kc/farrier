@@ -104,6 +104,13 @@ final class HelperService: NSObject, HelperProtocol {
         reply(encodeJSON(["ok": true, "approved": true, "planHash": parsed.planHash.hex]))
     }
 
+    func tccProbe(home: String, reply: @escaping (Data) -> Void) {
+        // Read-only and harmless, but still limited to console-session callers like everything else.
+        let who = caller()
+        guard who["sessionOK"] as? Bool == true else { return refuse("caller is not in the console session", ["caller": who], reply) }
+        reply(encodeJSON(["ok": true, "probedBy": "helper (root, launchd)", "results": TCCProbe.run(home: home, includeUserFolders: false)]))
+    }
+
     func reset(authorization: Data, reply: @escaping (Data) -> Void) {
         let who = caller()
         guard who["sessionOK"] as? Bool == true else { return refuse("caller is not in the console session", ["caller": who], reply) }

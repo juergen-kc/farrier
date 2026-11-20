@@ -22,6 +22,9 @@ needs to be retrofitted.
       failed integrity check must rotate the key, the `farrier` command must be a wrapper (not a symlink), and the
       app needs a real icon and name. Still needed: Developer ID on a physical Mac.
 - [ ] Swift MCP SDK: stdio, output schemas, annotations, and Tasks extension support for the 2026-07-28 spec.
+      Code and test checklist: [spikes/mcp-sdk](../spikes/mcp-sdk/). **Known from the source:** SDK 0.12.1 supports
+      protocol versions up to 2025-11-25 only and has no Tasks extension. The spike also tests TCC attribution
+      (whose Full Disk Access applies when an AI client starts `farrier mcp`) and agent-triggered approvals.
 - [ ] Signing and notarization pipeline in GitHub Actions, plus a Homebrew cask.
 - [ ] Fixture capture script for Apple CLI outputs on macOS 14, 15, and 26.
 
