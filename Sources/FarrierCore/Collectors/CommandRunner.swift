@@ -61,10 +61,21 @@ public struct ProcessRunner: CommandRunning {
         while process.isRunning {
             if Date() > deadline {
                 timedOut = true
-                process.terminate()
+                process.terminate()  // SIGTERM, which a process can ignore…
                 break
             }
             usleep(10_000)
+        }
+        if timedOut {
+            // …so give it a short grace period, then SIGKILL. The wait stays bounded either way.
+            let killAt = Date().addingTimeInterval(2)
+            while process.isRunning && Date() < killAt { usleep(10_000) }
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            let giveUpAt = Date().addingTimeInterval(2)
+            while process.isRunning && Date() < giveUpAt { usleep(10_000) }
+            if process.isRunning {
+                return CommandResult(status: -1, stdout: "", stderr: "did not exit after SIGKILL", timedOut: true)
+            }
         }
         process.waitUntilExit()
         try? out.close()

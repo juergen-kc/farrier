@@ -61,6 +61,16 @@ struct ParserTests {
         #expect(managed.value(at: "userApproved") == .bool(true))
     }
 
+    @Test func unrecognisedValuesAreNil() {
+        // PR #3 review: values outside the known set must be unknown, not guessed.
+        #expect(Parsers.firewallGlobalState("Firewall is enabled. (State = 10)\n") == nil)          // not "on"
+        #expect(Parsers.csrutilStatus("System Integrity Protection status: unknown.\n") == nil)    // not "custom"
+        #expect(Parsers.csrutilStatus("System Integrity Protection status: pending.\n") == nil)
+        #expect(Parsers.profilesEnrollment("Enrolled via DEP: Unknown\nMDM enrollment: No\n") == nil)
+        #expect(Parsers.profilesEnrollment("Enrolled via DEP: No\nMDM enrollment: Unknown\n") == nil)
+        #expect(Parsers.profilesEnrollment("Enrolled via DEP: No\nMDM enrollment: Yes\n")?.value(at: "userApproved") == .bool(false))
+    }
+
     @Test func unrecognisedOutputIsNil() {
         // Never guess: an unknown output must make the fact unknown, not pass or fail.
         #expect(Parsers.fdesetupStatus("something new") == nil)
@@ -122,9 +132,9 @@ struct SystemCollectorTests {
 
     @Test func collectsRecordedOutputs() throws {
         let plist = self.plist
-        let collectors = SystemCollectors(runner: recorded) { path in
-            path == SystemCollectors.softwareUpdatePlist ? plist : nil
-        }
+        let collectors = SystemCollectors(runner: recorded,
+                                          readFile: { path in path == SystemCollectors.softwareUpdatePlist ? plist : nil },
+                                          fileExists: { $0 == SystemCollectors.softwareUpdatePlist })
         let result = collectors.collect()
         #expect(result.facts["filevault.status"] == .string("On"))
         #expect(result.facts["gatekeeper.assessments"] == .string("enabled"))  // answer on stderr
@@ -137,29 +147,41 @@ struct SystemCollectorTests {
 
     @Test func managedPreferencesWin() throws {
         let (plist, managed) = (self.plist, managedPlist)
-        let collectors = SystemCollectors(runner: recorded) { path in
+        let collectors = SystemCollectors(runner: recorded, readFile: { path in
             switch path {
             case SystemCollectors.softwareUpdatePlist: return plist
             case SystemCollectors.softwareUpdateManagedPlist: return managed
             default: return nil
             }
-        }
+        }, fileExists: { _ in true })
         let result = collectors.collect()
         #expect(result.facts["softwareupdate.prefs"]?.value(at: "ConfigDataInstall") == .bool(true))
         #expect(result.facts["softwareupdate.managedKeys"] == .array([.string("ConfigDataInstall")]))
     }
 
+    @Test func unreadableManagedPreferencesMakeTheFactUnknown() {
+        // PR #3 review: a managed plist that exists but can't be read or parsed must not fall back to local values.
+        let plist = self.plist
+        for managedData: Data? in [nil, Data("not a plist".utf8)] {
+            let result = SystemCollectors(runner: recorded, readFile: { path in
+                path == SystemCollectors.softwareUpdatePlist ? plist : managedData
+            }, fileExists: { _ in true }).collect()
+            #expect(result.facts["softwareupdate.prefs"] == nil)
+            #expect(result.notes.first { $0.fact == "softwareupdate.prefs" }?.status == .failed)
+        }
+    }
+
     @Test func missingToolsAreUnavailable() {
-        let result = SystemCollectors(runner: RecordedRunner([:])) { _ in nil }.collect()
+        let result = SystemCollectors(runner: RecordedRunner([:]), readFile: { _ in nil }, fileExists: { _ in false }).collect()
         #expect(result.facts.isEmpty)
         #expect(result.notes.allSatisfy { $0.status == .unavailable })
     }
 
     @Test func liveFactsDriveThePostureEngine() throws {
         let plist = self.plist
-        let collected = SystemCollectors(runner: recorded) { path in
-            path == SystemCollectors.softwareUpdatePlist ? plist : nil
-        }.collect()
+        let collected = SystemCollectors(runner: recorded,
+                                         readFile: { path in path == SystemCollectors.softwareUpdatePlist ? plist : nil },
+                                         fileExists: { $0 == SystemCollectors.softwareUpdatePlist }).collect()
         let (packs, _) = RuleLinter.loadPacks(at: [repoRoot.appendingPathComponent("rules/posture").path], source: .bundled)
         let report = PostureEngine.evaluate(packs, facts: StaticFactStore(collected))
         let firewall = try #require(report.findings.first { $0.ruleID == "posture.core.firewall" })

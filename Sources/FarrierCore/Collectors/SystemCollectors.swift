@@ -26,11 +26,23 @@ public struct CollectionResult: Sendable {
 public struct SystemCollectors: Sendable {
     public let runner: CommandRunning
     public let readFile: @Sendable (String) -> Data?
+    /// Separate from `readFile`, so an absent file can be told apart from one that exists but can't be read.
+    public let fileExists: @Sendable (String) -> Bool
 
     public init(runner: CommandRunning = ProcessRunner(),
-                readFile: @escaping @Sendable (String) -> Data? = { FileManager.default.contents(atPath: $0) }) {
+                readFile: @escaping @Sendable (String) -> Data? = { FileManager.default.contents(atPath: $0) },
+                fileExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) {
         self.runner = runner
         self.readFile = readFile
+        self.fileExists = fileExists
+    }
+
+    /// A property-list file: absent (nil, nil), read (object, nil), or present but unreadable/corrupt (nil, problem).
+    func loadPlist(_ path: String) -> (object: [String: FactValue]?, problem: String?) {
+        guard fileExists(path) else { return (nil, nil) }
+        guard let data = readFile(path) else { return (nil, "cannot read \(path)") }
+        guard let object = Parsers.propertyList(data)?.object else { return (nil, "cannot parse \(path)") }
+        return (object, nil)
     }
 
     /// Fact id → how to collect it.
@@ -91,8 +103,18 @@ public struct SystemCollectors: Sendable {
 
     func collectSoftwareUpdate(into facts: inout [String: FactValue], notes: inout [CollectionNote]) {
         let fact = "softwareupdate.prefs"
-        let local = readFile(Self.softwareUpdatePlist).flatMap(Parsers.propertyList)?.object
-        let managed = readFile(Self.softwareUpdateManagedPlist).flatMap(Parsers.propertyList)?.object
+        let (local, localProblem) = loadPlist(Self.softwareUpdatePlist)
+        let (managed, managedProblem) = loadPlist(Self.softwareUpdateManagedPlist)
+        // Managed settings that exist but can't be read must not be replaced by local values: those might not be
+        // the effective settings. The fact stays unknown.
+        if let managedProblem {
+            notes.append(CollectionNote(fact: fact, status: .failed, source: Self.softwareUpdateManagedPlist, detail: managedProblem))
+            return
+        }
+        if let localProblem, managed == nil {
+            notes.append(CollectionNote(fact: fact, status: .failed, source: Self.softwareUpdatePlist, detail: localProblem))
+            return
+        }
         guard local != nil || managed != nil else {
             notes.append(CollectionNote(fact: fact, status: .unavailable, source: Self.softwareUpdatePlist, detail: "not found"))
             return
