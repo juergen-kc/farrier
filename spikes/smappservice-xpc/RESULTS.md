@@ -34,18 +34,18 @@ What the user sees (X2):
 | Test | Result | notes |
 |---|---|---|
 | X6 ping (euid 0, identifier) | ✅ | `helperEuid: 0`, `helperIdentifier: dev.farrier.spike.helper`. The log shows "starting", "right created (authenticate-admin)", and the client requirement. |
-| X7 ad hoc client rejected | not run yet | first attempt used the wrong path (`$PWD` was `~`) |
-| X8 same team, other identifier rejected | not run yet | same |
+| X7 ad hoc client rejected | ✅ | `NSCocoaErrorDomain` **4097**. The helper log shows the connection, then "invalidated", with no reply. A helper-side rejection reaches the client as 4097 (connection interrupted), a client-side one (X9) as 4102. |
+| X8 same team, other identifier rejected | ✅ | 4097, as in X7. Pinning is per identifier, not just per team. |
 | X9 client rejects unexpected helper | ✅ | `NSCocoaErrorDomain` **4102** "Couldn't communicate with a helper application." The helper log shows the connection, then "invalidated". |
 | X10 same binary outside the bundle | **killed** | `cp $F /tmp/fs-copy && /tmp/fs-copy ping` → `zsh: killed`. The main executable's signature also covers the bundle (Info.plist), so a copy outside it is invalid, and macOS kills it on launch. Good for security. It means the CLI must run **from inside the bundle**. |
-| X10b symlink to the binary in the bundle | | the Homebrew-style `farrier` command |
+| X10b symlink to the binary in the bundle | ✅ with a caveat | `ping` works (the helper checks the real binary's signature), and `daemonStatus` is `enabled`. But `Bundle.main` resolves from the symlink: `bundlePath: /tmp`, `bundleID: (none)`. **Product:** have Homebrew install a wrapper script (`exec /Applications/Farrier.app/Contents/MacOS/farrier "$@"`), not a symlink, or resolve the real path at startup. |
 
 ## 3. Console-session check
 
 | Test | sessionOK | bits | graphic | remote | notes |
 |---|---|---|---|---|---|
-| X11 local | | | | | |
-| X12 sudo | | | | | |
+| X11 local | ✅ true | 0x6030 | yes | no | `sessionGetInfoStatus: 0`: **SessionGetInfo works from root for another process's session.** asid 100013, consoleUser juergen. Bits 0x6030 = graphic (0x10) + TTY (0x20) + 0x2000 (presumably console access) + 0x4000 (presumably authenticated) |
+| X12 sudo | ✅ false | 0x6030 | yes | no | refused: "caller euid 0 is not the console user". **sudo keeps the same audit session (asid 100013)**, so the session bits alone would accept it. The euid check is essential. |
 | X13 SSH | | | | | |
 | X14 Claude Code | | | | | |
 
