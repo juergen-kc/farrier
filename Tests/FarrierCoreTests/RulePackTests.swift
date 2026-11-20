@@ -84,7 +84,10 @@ struct RulePackTests {
         let r = parse(validCleanup)
         #expect(errors(r.issues).isEmpty, "\(r.issues)")
         guard case .cleanup(let c) = try #require(r.pack?.rules.first) else { Issue.record("expected a cleanup"); return }
-        #expect(c.minAge?.seconds == 14 * 86_400)
+        // Unwrap first: comparing the optional chain with a computed literal reported equal values as unequal.
+        let minAge = try #require(c.minAge)
+        let fourteenDays: Int64 = 14 * 86_400
+        #expect(minAge.seconds == fourteenDays)
         #expect(c.minSize == 50_000_000)
         #expect(c.targets.first?.type == .directory)
     }
