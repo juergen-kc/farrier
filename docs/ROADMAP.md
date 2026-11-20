@@ -45,16 +45,21 @@ Done:
       helper survives an app reinstall without re-registering. Over SSH the helper refuses both the user
       (session 0x5020, remote) and `sudo` (also not the console user), and the fact is reported as failed.
 
+- [x] Plan → approve → apply for the first fix, `firewall.enable` (T4): canonical plans with a hash and expiry
+      (`farrier plan posture|show|list`), the Secure Enclave approval key in the login keychain with the
+      access-list integrity check (`farrier setup [--rotate]`), admin-authorized enrollment, one-time nonces, the
+      helper's `applyPlan` (verifies and applies in one call, re-checks MDM ownership and the current state), and
+      hash-chained user and helper journals (`farrier journal verify|show`). Not yet validated on a Mac.
+
 To do:
-- Approval key: setup, admin-authorized enrollment, the integrity check with automatic rotation, and the
-  console-session check
+- Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
+  Developer ID signing
 - Packaging: a root-owned `Farrier.app` with an icon; the Homebrew cask installs a `farrier` wrapper script;
   uninstall removes the LaunchDaemon, the enrolled key and the authorization right
 - Full Disk Access onboarding: detect via the helper, open the right Settings pane, and report "unknown" without it
 - MCP server: progress notifications, annotation titles, and letting in-flight requests finish at end of input
-- `farrier-helper` with `readPrivileged` and `setSystemSetting` (small allowlist: firewall,
-  stealth mode, automatic update settings)
-- Plan, approve and apply, with the journal
+- More fixes in the remediation catalog: stealth mode, Gatekeeper, automatic security updates
+- Undo for T4 changes (record the previous state, plan the reverse change)
 - `posture.core` pack: about 25 high-value checks with mSCP mappings
 - Managed-device detection (`managed` findings are not fixable locally)
 - `inventory` with signing and notarization status for launchd jobs, login items and extensions

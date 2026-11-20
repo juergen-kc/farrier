@@ -150,13 +150,13 @@ fixture tests for every supported macOS version.
   | `quarantine(items, planProof)` | Move root-owned items into root quarantine |
   | `restore(planID)` / `expireQuarantine()` | Restore items, or expire them after the retention window |
   | `deleteLocalSnapshot(name, planProof)` | Delete an APFS local snapshot (irreversible, so it is T3) |
-  | `setSystemSetting(key, value, planProof)` | Change an allowlisted setting (firewall on, stealth mode, etc.) |
+  | `applyPlan(plan, payload, signature)` | Verify the approval and carry out the plan's items, all in one call. Items are **remediation catalog** actions only (so far `firewall.enable`); the helper takes no settings, values, commands or paths from the client |
   | `uninstallPkgReceipt(id, planProof)` | Remove installer receipts and files listed in a bill of materials (BOM) |
   | `adapterRequest(adapter, op, planProof?)` | Make a signed management-plane call (JumpCloud System Context) |
   | `beginApproval(planHash)` | Issue a one-time nonce and expiry for one approval (prevents replay) |
   | `enrollApprovalKey(publicKey, authorization)` | Register the approval public key. Requires **admin** authorization (see below) |
   | `revokeApprovalKey(authorization)` | Remove the enrolled key, for rotation or uninstall. Requires admin authorization |
-  | `submitApproval(payload, signature)` | Verify a signed approval; consumes the nonce |
+  | `approvalKeyStatus()` | Whether a key is enrolled, and its fingerprint |
 
 - The helper **re-validates** every item itself. It does not trust the client's plan contents.
   It resolves paths with `O_NOFOLLOW` on each path component, checks owner, mode and inode against what the plan
@@ -254,13 +254,25 @@ The same keychain also refuses SSH sessions (finding F4).
    **derives from the plan itself**, never from arguments or agent text. For example:
    *"farrier is trying to approve plan 3f9a…: delete 2 APFS snapshots (12.4 GB), irreversible."*
    The prompt names the **executable file name**, so the binary must be called `farrier`.
-4. The signature (ECDSA P-256, DER) is the `planProof`. The helper verifies it against the enrolled public key,
-   checks that the nonce is unused and unexpired, and that `planHash` and the expiry match what it issued. A nonce
-   is **consumed by any submission**, valid or not. In the spike, a replay, a tampered signature and an expired
-   approval were each refused.
+4. The client sends the plan's canonical bytes, the payload and the signature (ECDSA P-256, DER) to `applyPlan`.
+   The helper consumes the nonce (**any submission consumes it**, valid or not), checks that `planHash` and the
+   expiry match what it issued and haven't passed, verifies the signature against the enrolled public key, hashes
+   the plan bytes itself, requires them to be the plan's exact canonical encoding, and checks the plan's host and
+   expiry and that every item is a catalog action with the catalog's tier. Only then does it act. In the spike, a
+   replay, a tampered signature and an expired approval were each refused; the product's tests cover these and
+   more (`PlanApproval.verify`, tested on Linux).
+
+   Verifying and applying are one verb on purpose: with a separate `submitApproval`, a verified approval would have
+   to be remembered and later matched to a plan, which is one more place for the two to come apart.
+
+**Carrying out an item.** Each catalog action is fixed code in the helper that re-checks the Mac first. For
+`firewall.enable`: the helper reads the MDM profiles itself and refuses if one manages the firewall, or if it can't
+tell; it reads the current state and reports `alreadyCompliant`, or refuses if the state differs from what the plan
+recorded; then it runs `socketfilterfw --setglobalstate on` and reports success only if reading the state back shows
+the firewall on. Every outcome goes to the helper's journal.
 
 **Console-session check (required, verified).** The helper accepts approval-related calls (`beginApproval`,
-`submitApproval`, enrollment, revocation) only from the user session at the screen. For each call:
+`applyPlan`, enrollment, revocation) only from the user session at the screen. For each call:
 1. Take the caller's audit session ID from the XPC connection (`NSXPCConnection.auditSessionIdentifier`).
 2. Call `SessionGetInfo` on it. This works from root for another process's session. Require the session to have
    **graphics access** (bit `0x0010`) and **not be remote** (bit `0x1000`).
