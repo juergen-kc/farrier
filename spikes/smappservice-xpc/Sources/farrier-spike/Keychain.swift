@@ -75,20 +75,26 @@ enum Keychain {
     /// Lists the item's access-control entries and the applications each one trusts.
     /// Expected: the "decrypt" entry trusts only FarrierSpike. Anything else means someone clicked "Always Allow".
     static func accessList() throws -> [String: Any] {
+        // Fails closed: if the access list can't be read, integrity is reported as NOT ok.
+        func failClosed(_ st: OSStatus, _ context: String) -> [String: Any] {
+            var d = describe(OSStatusError(st, context))
+            d["integrityOK"] = false
+            return d
+        }
         var q = baseQuery
         q[kSecReturnRef as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var ref: CFTypeRef?
         var st = SecItemCopyMatching(q as CFDictionary, &ref)
-        guard st == errSecSuccess, let ref else { throw OSStatusError(st, "keychain lookup") }
+        guard st == errSecSuccess, let ref else { return failClosed(st, "keychain lookup") }
         let item = ref as! SecKeychainItem  // swiftlint:disable:this force_cast
 
         var access: SecAccess?
         st = SecKeychainItemCopyAccess(item, &access)
-        guard st == errSecSuccess, let access else { throw OSStatusError(st, "SecKeychainItemCopyAccess") }
+        guard st == errSecSuccess, let access else { return failClosed(st, "SecKeychainItemCopyAccess") }
         var list: CFArray?
         st = SecAccessCopyACLList(access, &list)
-        guard st == errSecSuccess, let list else { throw OSStatusError(st, "SecAccessCopyACLList") }
+        guard st == errSecSuccess, let list else { return failClosed(st, "SecAccessCopyACLList") }
 
         // The keychain records the trusted app as the BUNDLE path (seen in the first VM run), so both count as "self".
         let selfPaths: Set<String> = [Bundle.main.executablePath ?? "", Bundle.main.bundlePath]
@@ -99,17 +105,28 @@ enum Keychain {
             var apps: CFArray?
             var desc: CFString?
             var selector = SecKeychainPromptSelector()
+            // If the contents can't be read, `apps` stays nil and the entry is treated as open to any app,
+            // which fails closed for sensitive entries below.
             _ = SecACLCopyContents(acl, &apps, &desc, &selector)
             let auths = ((SecACLCopyAuthorizations(acl) as NSArray) as? [String]) ?? []
+            // Entries that give access to the secret itself. Encrypt and Integrity entries are benign and stay allowed.
+            let sensitive = auths.contains { a in ["Decrypt", "Derive", "Export", "Sign", "MAC", "Any"].contains { a.contains($0) } }
+            // Whoever may change the access list can grant themselves anything, so NO application may hold it.
+            let changesACL = auths.contains { $0.contains("ChangeACL") }
             var entry: [String: Any] = ["authorizations": auths]
             if let apps {
                 let paths = (apps as NSArray).map { appPath($0 as! SecTrustedApplication) }  // swiftlint:disable:this force_cast
                 entry["trustedApps"] = paths
-                if auths.contains(where: { $0.contains("Decrypt") || $0.contains("Any") }) {
+                if changesACL {
+                    foreign += paths.map { "ChangeACL: \($0)" }
+                } else if sensitive {
                     foreign += paths.filter { !selfPaths.contains($0) && !$0.hasPrefix("group://") }
                 }
             } else {
                 entry["trustedApps"] = "ANY application"
+                if sensitive || changesACL {
+                    foreign.append("ANY application: \(auths.joined(separator: ","))")
+                }
             }
             entries.append(entry)
         }

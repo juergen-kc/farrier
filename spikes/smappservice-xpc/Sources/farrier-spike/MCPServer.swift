@@ -37,7 +37,8 @@ enum FarrierMCP {
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: Tools.all) }
         await server.withMethodHandler(CallTool.self) { params in
             wire.note("tools/call \(params.name)")
-            return await Tools.call(params, server: server)
+            // Throwing (for example CancellationError) lets the SDK finish a cancelled request without a result.
+            return try await Tools.call(params, server: server)
         }
         await server.withMethodHandler(ListResources.self) { _ in
             .init(resources: [Resource(name: "spike-info", uri: "farrier-spike://info", title: "Spike process info",
@@ -129,7 +130,7 @@ enum Tools {
         ),
     ]
 
-    static func call(_ params: CallTool.Parameters, server: Server) async -> CallTool.Result {
+    static func call(_ params: CallTool.Parameters, server: Server) async throws -> CallTool.Result {
         let args = params.arguments ?? [:]
         switch params.name {
         case "system_info":
@@ -165,7 +166,8 @@ enum Tools {
             let token = params._meta?.progressToken
             let started = Date()
             for i in 1...seconds {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                // Not `try?`: if the client cancels the call, the sleep throws CancellationError and we stop.
+                try await Task.sleep(nanoseconds: 1_000_000_000)
                 if let token {
                     try? await server.notify(ProgressNotification.message(
                         .init(progressToken: token, progress: Double(i), total: Double(seconds), message: "\(i)/\(seconds) s")))

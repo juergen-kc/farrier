@@ -111,5 +111,10 @@ do {
         exit(2)
     }
 } catch {
+    if command == "mcp" {
+        // In MCP mode, stdout belongs to the protocol. Report startup errors on stderr only.
+        FileHandle.standardError.write(Data("farrier-spike mcp: \(error)\n".utf8))
+        exit(1)
+    }
     finish(command, describe(error))
 }

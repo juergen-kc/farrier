@@ -117,6 +117,9 @@ So:
   *"Farrier approval key — Farrier never asks for this. Click Deny."*
 - Say in the docs: any keychain dialog about this key is an attack.
 - Residual risk: a user who clicks "Always Allow" permanently adds the attacker's binary to the trust list.
+- Residual risk (from the PR review): even a **one-time "Allow"** (C6) hands the reusable blob to the other program
+  without changing the access list, so no integrity check can detect it. Mitigation: periodic key rotation; long-term,
+  bind the key's use to Farrier's code identity (Approach B, to be re-tested with Developer ID).
   Mitigation idea: Farrier checks the item's access list at startup (`SecKeychainItemCopyAccess`) and warns,
   or recreates the key, if anything other than itself is trusted.
 

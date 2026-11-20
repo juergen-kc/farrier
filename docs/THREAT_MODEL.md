@@ -82,10 +82,23 @@
   nonce and an expiry, made by a Secure Enclave key that needs user presence for every signature. The helper
   checks it against a public key enrolled with admin authorization (an `authenticate-admin` right, with the
   dialog shown each time). A compromised user process can't forge it without the user being present.
-- **The key can only be used by Farrier.** Its blob is stored in the login keychain, with an access list that
-  trusts only Farrier's signing identity. In the spike, every other binary (an ad hoc build, Apple's `security`
-  tool, and a same-team binary with another identifier) got a keychain dialog and a login-password request
-  before reaching the signing prompt. A Farrier update keeps access (spike tests C3 to C5 and C9).
+- **Only Farrier can read the key blob without a keychain dialog.** The blob is stored in the login keychain,
+  with an access list that trusts only Farrier's signing identity. In the spike, every other binary (an ad hoc
+  build, Apple's `security` tool, and a same-team binary with another identifier) got a keychain dialog and a
+  login-password request before reaching the signing prompt. A Farrier update keeps access (spike tests C3 to C5 and
+  C9).
+- **But the blob is a reusable credential once disclosed (residual risk).** If the user approves that keychain
+  dialog even **once** ("Allow", spike test C6), the other program receives the blob and can keep it. From then on,
+  it can request signatures from any process, with a prompt text and executable name of its choosing (F1). User
+  presence is still required for every signature, but the prompt can lie. A one-time "Allow" leaves **no trace in
+  the access list**, so the integrity check cannot detect it ("Always Allow" can be detected; see F2). Mitigations:
+  - the item label warns that Farrier never shows this dialog
+  - **periodic key rotation** (planned: every 30 days, and on demand), which limits how long a disclosed blob stays useful
+  - rotate immediately whenever the integrity check finds anything
+  - **preferred long-term fix:** a key whose *use* (not just storage) is bound to Farrier's code identity, for example a
+    Secure Enclave key in the data-protection keychain with an access group (spike Approach B). That needs an
+    entitlement that may require a provisioning profile for Developer ID. To be re-tested once a Developer ID
+    certificate exists.
 - **Replay.** Each approval includes a one-time nonce from the helper and expires after 5 minutes. A nonce is
   consumed by any submission. Verified: replay, tampering and expiry were each refused.
 - **Misleading prompts.** The prompt names the calling executable by file name, and its text is supplied by
@@ -103,6 +116,7 @@
   else is trusted. Rotating, not just warning, matters because the other program has then already been able to
   read the blob, which works from any process. Verified: the check detected `/usr/bin/security` after "Always Allow".
 - **Residual risks:**
+  - a one-time "Allow" in a keychain dialog discloses the reusable key blob (see above), until the next rotation
   - code injected into the genuine, signed Farrier process (reduced by the hardened runtime and library validation)
   - a user who approves a prompt without reading it
   - an attacker with the user's password *and* a console session

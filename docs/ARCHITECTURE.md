@@ -289,6 +289,14 @@ Rotation is necessary because "Always Allow" means the other program has already
 and the blob can be used from any process (finding F1). In the spike, the access list detected
 `/usr/bin/security` after "Always Allow", and `security` had indeed printed the blob.
 
+The check is strict: any app other than Farrier on an entry that grants access to the secret (decrypt, derive,
+export, sign, MAC), an entry like that open to *any* application, or **any** app allowed to change the access list,
+counts as a failure. If the access list can't be read, the check fails closed.
+
+**Limit:** a one-time "Allow" in a keychain dialog also hands over the blob, but leaves the access list unchanged,
+so this check cannot see it. That's why the key is also **rotated periodically** (planned: every 30 days). See
+THREAT_MODEL.md, T-3, for the residual risk and the longer-term fix (binding the key's use to Farrier's code identity).
+
 **Apply.** `farrier apply <id>` (or the `apply_plan` tool) loads the plan, checks that the
 hash and expiry are valid, and re-fingerprints every item. Any mismatch drops that item and
 reports it, so a file swapped after planning (time-of-check to time-of-use, TOCTOU) is not acted on. User-owned items are applied in-process.
