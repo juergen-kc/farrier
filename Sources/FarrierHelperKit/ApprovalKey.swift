@@ -15,10 +15,13 @@ import Security
 public enum ApprovalKey {
     static let service = "dev.farrier.approval"
     static let account = "approval"
+    /// A new key waits here until the helper has enrolled it, so a cancelled or failed enrollment leaves the
+    /// working key (the one the helper trusts) in place.
+    static let pendingAccount = "approval.pending"
     /// Keychain dialogs show the label, so it carries the warning (Secure Enclave spike, finding F2).
     static let label = "Farrier approval key — Farrier never asks for this. Click Deny."
 
-    private static var baseQuery: [String: Any] {
+    private static func query(_ account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -26,6 +29,8 @@ public enum ApprovalKey {
             kSecUseDataProtectionKeychain as String: false,
         ]
     }
+
+    private static var baseQuery: [String: Any] { query(account) }
 
     public static var isAvailable: Bool { SecureEnclave.isAvailable }
 
@@ -35,8 +40,9 @@ public enum ApprovalKey {
         return SecItemCopyMatching(q as CFDictionary, nil) == errSecSuccess
     }
 
-    /// Creates a new key, replacing any existing one, and returns its public key (DER).
-    public static func create() throws -> Data {
+    /// Creates a new key as the PENDING key (replacing an earlier pending one, never the working key) and returns
+    /// its public key (DER). `promotePending()` makes it the working key once the helper has enrolled it.
+    public static func createPending() throws -> Data {
         guard SecureEnclave.isAvailable else { throw ApprovalKeyError("this Mac has no Secure Enclave") }
         var cfError: Unmanaged<CFError>?
         guard let ac = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
@@ -44,8 +50,25 @@ public enum ApprovalKey {
             throw cfError!.takeRetainedValue() as Error
         }
         let key = try SecureEnclave.P256.Signing.PrivateKey(compactRepresentable: false, accessControl: ac)
-        _ = SecItemDelete(baseQuery as CFDictionary)
+        _ = SecItemDelete(query(pendingAccount) as CFDictionary)
+        try store(key.dataRepresentation, account: pendingAccount)
+        return key.publicKey.derRepresentation
+    }
 
+    /// Replaces the working key with the pending one. Reading our own item doesn't prompt.
+    public static func promotePending() throws {
+        let data = try blob(pendingAccount)
+        _ = SecItemDelete(baseQuery as CFDictionary)
+        try store(data, account: account)
+        _ = SecItemDelete(query(pendingAccount) as CFDictionary)
+    }
+
+    public static func discardPending() {
+        _ = SecItemDelete(query(pendingAccount) as CFDictionary)
+    }
+
+    /// Adds the blob as a generic password whose access list trusts only this application.
+    private static func store(_ data: Data, account: String) throws {
         var selfApp: SecTrustedApplication?
         var st = SecTrustedApplicationCreateFromPath(nil, &selfApp)  // nil: this application
         guard st == errSecSuccess, let selfApp else { throw ApprovalKeyError(st, "SecTrustedApplicationCreateFromPath") }
@@ -53,22 +76,22 @@ public enum ApprovalKey {
         st = SecAccessCreate(label as CFString, [selfApp] as CFArray, &access)
         guard st == errSecSuccess, let access else { throw ApprovalKeyError(st, "SecAccessCreate") }
 
-        var attrs = baseQuery
+        var attrs = query(account)
         attrs[kSecAttrLabel as String] = label
-        attrs[kSecValueData as String] = key.dataRepresentation
+        attrs[kSecValueData as String] = data
         attrs[kSecAttrAccess as String] = access
         st = SecItemAdd(attrs as CFDictionary, nil)
         guard st == errSecSuccess else { throw ApprovalKeyError(st, "SecItemAdd") }
-        return key.publicKey.derRepresentation
     }
 
     public static func delete() throws {
+        discardPending()
         let st = SecItemDelete(baseQuery as CFDictionary)
         guard st == errSecSuccess || st == errSecItemNotFound else { throw ApprovalKeyError(st, "SecItemDelete") }
     }
 
-    private static func blob() throws -> Data {
-        var q = baseQuery
+    private static func blob(_ account: String = ApprovalKey.account) throws -> Data {
+        var q = query(account)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
@@ -135,7 +158,9 @@ public enum ApprovalKey {
             if changesACL {
                 problems += paths.map { "\($0) may change the access list" }
             } else if sensitive {
-                problems += paths.filter { !selfPaths.contains($0) && !$0.hasPrefix("group://") }.map { "\($0) may use the key" }
+                // Only Farrier itself. A `group://` entry is not exempt: its members can't be verified here, so
+                // it counts as someone else and leads to rotation.
+                problems += paths.filter { !selfPaths.contains($0) }.map { "\($0) may use the key" }
             }
         }
         return problems

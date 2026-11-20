@@ -12,33 +12,33 @@ extension HelperClient {
     }
 
     public static func approvalKeyStatus() throws -> ApprovalKeyStatus {
-        try decode(ApprovalKeyStatus.self, try call { h, r in h.approvalKeyStatus(clientVersion: FarrierVersion.string, reply: r) })
+        try decode(ApprovalKeyStatus.self, try call { h, r in h.approvalKeyStatus(clientVersion: HelperConstants.handshakeVersion, reply: r) })
     }
 
     /// Shows the admin dialog (from the helper's authorization request).
     public static func enrollApprovalKey(_ publicKey: Data) throws -> ApprovalKeyStatus {
         let auth = try AdminAuthorization.externalForm()
         return try decode(ApprovalKeyStatus.self, try call { h, r in
-            h.enrollApprovalKey(publicKey: publicKey, authorization: auth, clientVersion: FarrierVersion.string, reply: r)
+            h.enrollApprovalKey(publicKey: publicKey, authorization: auth, clientVersion: HelperConstants.handshakeVersion, reply: r)
         })
     }
 
     public static func revokeApprovalKey() throws -> ApprovalKeyStatus {
         let auth = try AdminAuthorization.externalForm()
         return try decode(ApprovalKeyStatus.self, try call { h, r in
-            h.revokeApprovalKey(authorization: auth, clientVersion: FarrierVersion.string, reply: r)
+            h.revokeApprovalKey(authorization: auth, clientVersion: HelperConstants.handshakeVersion, reply: r)
         })
     }
 
     public static func beginApproval(planHash: Data) throws -> BeginApprovalReply {
         try decode(BeginApprovalReply.self, try call { h, r in
-            h.beginApproval(planHash: planHash, clientVersion: FarrierVersion.string, reply: r)
+            h.beginApproval(planHash: planHash, clientVersion: HelperConstants.handshakeVersion, reply: r)
         })
     }
 
     public static func applyPlan(_ plan: Data, payload: Data, signature: Data) throws -> ApplyReply {
         try decode(ApplyReply.self, try call { h, r in
-            h.applyPlan(plan: plan, payload: payload, signature: signature, clientVersion: FarrierVersion.string, reply: r)
+            h.applyPlan(plan: plan, payload: payload, signature: signature, clientVersion: HelperConstants.handshakeVersion, reply: r)
         })
     }
 }
@@ -70,6 +70,7 @@ public enum ApprovalSetup {
     public static func run(rotate: Bool = false) throws -> SetupReport {
         var report = SetupReport()
         guard ApprovalKey.isAvailable else { throw ApprovalKeyError("this Mac has no Secure Enclave, so plans that need approval can't be applied") }
+        try HelperClient.ensureCurrent()
         let status = try HelperClient.approvalKeyStatus()
         if let error = status.error { throw ApprovalKeyError(error) }
 
@@ -83,10 +84,12 @@ public enum ApprovalSetup {
             if !problems.isEmpty { reason = "integrity check failed: \(problems.joined(separator: "; "))" }
         }
 
+        // A new key is staged and becomes the working key only after the helper has enrolled it: cancelling the
+        // admin dialog leaves everything as it was.
         let publicKey: Data
         if let reason {
             report.steps.append("creating a new approval key (\(reason))")
-            publicKey = try ApprovalKey.create()
+            publicKey = try ApprovalKey.createPending()
         } else {
             publicKey = try ApprovalKey.publicKey()
             report.steps.append("approval key present, access list intact")
@@ -99,9 +102,18 @@ public enum ApprovalSetup {
             return report
         }
         report.steps.append("enrolling with the helper (an admin dialog will appear)")
-        let enrolled = try HelperClient.enrollApprovalKey(publicKey)
-        if let error = enrolled.error { throw ApprovalKeyError("enrollment failed: \(error)") }
-        guard enrolled.fingerprint == fingerprint else { throw ApprovalKeyError("the helper enrolled a different key") }
+        do {
+            let enrolled = try HelperClient.enrollApprovalKey(publicKey)
+            if let error = enrolled.error { throw ApprovalKeyError("enrollment failed: \(error)") }
+            guard enrolled.fingerprint == fingerprint else { throw ApprovalKeyError("the helper enrolled a different key") }
+        } catch {
+            if reason != nil { ApprovalKey.discardPending() }
+            throw error
+        }
+        if reason != nil {
+            try ApprovalKey.promotePending()
+            report.steps.append("the new key replaced the old one")
+        }
         report.steps.append("enrolled \(fingerprint.prefix(16))…")
         return report
     }
@@ -128,7 +140,9 @@ public enum PlanApplyError: Error, CustomStringConvertible {
 public enum PlanApplier {
     /// The prompt text, derived from the plan only: "farrier is trying to <this>".
     public static func promptReason(for plan: Plan) -> String {
-        let changes = plan.items.map(\.summary).joined(separator: "; ")
+        // From the catalog, never from the plan's own text (decodeCanonical also rejects plans where they differ).
+        let changes = plan.items.map { RemediationCatalog.action($0.action)?.summary ?? "unknown change \($0.action)" }
+            .joined(separator: "; ")
         let what = plan.items.count == 1 ? changes : "\(plan.items.count) changes: \(changes)"
         return "apply Farrier plan \(plan.shortHash()) (\(plan.tier.rawValue)): \(what)"
     }
@@ -139,6 +153,7 @@ public enum PlanApplier {
         guard plan.host == HostIdentity.hardwareUUID() else { throw PlanApplyError.otherHost }
         guard plan.tier.needsApproval else { throw PlanApplyError.notReady("only plans that need approval (T3/T4) go to the helper") }
 
+        try HelperClient.ensureCurrent()
         let status = try HelperClient.approvalKeyStatus()
         if let error = status.error { throw PlanApplyError.notReady(error) }
         guard status.enrolled, ApprovalKey.exists else {
@@ -155,6 +170,7 @@ public enum PlanApplier {
         }
 
         let data = try plan.canonicalData()
+        _ = try Plan.decodeCanonical(data)  // the same checks the helper makes, before anything is shown or signed
         let hash = FarrierCrypto.sha256(data)
         let begin = try HelperClient.beginApproval(planHash: hash)
         guard let grant = begin.grant, let nonce = Data(hexString: grant.nonce) else {
@@ -163,7 +179,8 @@ public enum PlanApplier {
         let payload = ApprovalPayload.build(planHash: hash, nonce: nonce, expiresAt: grant.expiresAt)
         let signature = try ApprovalKey.sign(payload, reason: promptReason(for: plan))
         let reply = try HelperClient.applyPlan(data, payload: payload, signature: signature)
-        if let error = reply.error { throw PlanApplyError.refused(error) }
+        // Refused outright → throw. Stopped partway (results plus an error) → return both, so nothing done is hidden.
+        if let error = reply.error, reply.results.isEmpty { throw PlanApplyError.refused(error) }
         return reply
     }
 }

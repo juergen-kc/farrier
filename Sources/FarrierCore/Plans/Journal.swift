@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Glibc)
+import Glibc
+#endif
 
 /// One journal line, before it is hashed.
 public struct JournalRecord: Codable, Sendable, Equatable {
@@ -55,33 +58,57 @@ public struct Journal: Sendable {
         self.mode = mode
     }
 
+    /// Appends one entry. Reading the last hash and writing the new line happen under an exclusive `flock` on the
+    /// journal itself, so concurrent writers (two CLIs, two helper connections) can't fork the chain, and the write
+    /// is a single `write(2)` on an `O_APPEND` descriptor. A journal that can't be read or parsed is not appended
+    /// to: the caller must treat that as a failure (the helper then refuses to change anything).
     public func append(_ record: JournalRecord) throws {
-        let fm = FileManager.default
-        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let prev = try entries().last?.hash ?? Journal.genesis
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let fd = open(url.path, O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC, mode_t(mode))
+        guard fd >= 0 else { throw PlanError("could not open the journal at \(url.path) (errno \(errno))") }
+        defer { close(fd) }
+        guard flock(fd, LOCK_EX) == 0 else { throw PlanError("could not lock the journal (errno \(errno))") }
+        defer { flock(fd, LOCK_UN) }
+
+        let existing = try Journal.readAll(fd)
+        let prev = try Journal.parse(existing).last?.hash ?? Journal.genesis
         let entry = JournalEntry(record: record, prevHash: prev, hash: try JournalEntry.hash(record: record, prevHash: prev))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         var line = try encoder.encode(entry)
+        // A journal whose last line lost its newline (e.g. a crash mid-write) would merge with ours.
+        if let last = existing.last, last != 0x0A { line.insert(0x0A, at: 0) }
         line.append(0x0A)
-        if !fm.fileExists(atPath: url.path) {
-            guard fm.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: NSNumber(value: mode)]) else {
-                throw PlanError("could not create the journal at \(url.path)")
-            }
+        let written = line.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+        guard written == line.count else { throw PlanError("could not write the journal (errno \(errno))") }
+        guard fsync(fd) == 0 else { throw PlanError("could not sync the journal (errno \(errno))") }
+    }
+
+    private static func readAll(_ fd: Int32) throws -> Data {
+        guard lseek(fd, 0, SEEK_SET) == 0 else { throw PlanError("could not read the journal (errno \(errno))") }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 65_536)
+        while true {
+            let n = buffer.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
+            if n < 0 { throw PlanError("could not read the journal (errno \(errno))") }
+            if n == 0 { return data }
+            data.append(contentsOf: buffer[0..<n])
         }
-        let handle = try FileHandle(forWritingTo: url)
-        defer { try? handle.close() }
-        try handle.seekToEnd()
-        try handle.write(contentsOf: line)
+    }
+
+    private static func parse(_ data: Data) throws -> [JournalEntry] {
+        try String(decoding: data, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: true).enumerated().map { n, line in
+            guard let entry = try? JSONDecoder().decode(JournalEntry.self, from: Data(line.utf8)) else {
+                throw PlanError("journal line \(n + 1) is not an entry; run `farrier journal verify`")
+            }
+            return entry
+        }
     }
 
     /// All entries; an unreadable line throws (use `verify` to report problems instead).
     public func entries() throws -> [JournalEntry] {
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
-        let text = String(decoding: try Data(contentsOf: url), as: UTF8.self)
-        return try text.split(separator: "\n", omittingEmptySubsequences: true).map {
-            try JSONDecoder().decode(JournalEntry.self, from: Data($0.utf8))
-        }
+        return try Journal.parse(try Data(contentsOf: url))
     }
 
     /// Problems in the chain, by line number. Empty means intact (a missing journal is intact and empty).

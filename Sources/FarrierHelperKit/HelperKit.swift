@@ -9,6 +9,9 @@ public enum HelperConstants {
     public static let daemonPlist = "dev.farrier.helper.plist" // Farrier.app/Contents/Library/LaunchDaemons/
     /// Bumped when the XPC protocol changes incompatibly.
     public static let protocolVersion = 2
+    /// What the version handshake compares: the build version AND the protocol, so a protocol change restarts a
+    /// running helper even when the version string stays the same (as it does between development builds).
+    public static var handshakeVersion: String { "\(FarrierVersion.string)+p\(protocolVersion)" }
 
     /// The helper's authorization right for enrolling or revoking the approval key (rule: authenticate-admin).
     public static let enrollRight = "dev.farrier.enroll-approval-key"

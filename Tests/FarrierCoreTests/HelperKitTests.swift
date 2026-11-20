@@ -19,6 +19,12 @@ struct HelperKitTests {
         #expect(plist.contains("Contents/MacOS/farrier-helper"))
     }
 
+    @Test func handshakeCoversTheProtocol() {
+        // A protocol change must restart a running helper even when the version string doesn't change.
+        #expect(HelperConstants.handshakeVersion == "\(FarrierVersion.string)+p\(HelperConstants.protocolVersion)")
+        #expect(HelperConstants.handshakeVersion != FarrierVersion.string)
+    }
+
     @Test func privilegedFactsAreAnAllowlist() {
         #expect(PrivilegedFact(rawValue: "mdm.payloadTypes") == .mdmPayloadTypes)
         #expect(PrivilegedFact(rawValue: "/etc/master.passwd") == nil)

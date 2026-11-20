@@ -19,7 +19,9 @@ helperLog("starting version=\(FarrierVersion.string) pid=\(getpid()) id=\(identi
 
 helperLog(Authz.ensureRight())
 
-let lifecycle = Lifecycle(idleTimeout: 60)
+let lifecycle = Lifecycle(idleTimeout: 60) {
+    HelperService.approvals.hasOutstanding(now: Int64(Date().timeIntervalSince1970))
+}
 
 final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection c: NSXPCConnection) -> Bool {

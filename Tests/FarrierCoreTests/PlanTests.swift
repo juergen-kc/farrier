@@ -92,6 +92,29 @@ struct PlanTests {
         #expect(throws: PlanError.self) { try Plan.decodeCanonical(lowered) }
     }
 
+    @Test func userPacksNeverPlanFixes() throws {
+        // The same posture pack, loaded as a user pack (e.g. given with --rules): it reports, but plans nothing.
+        let (packs, _) = RuleLinter.loadPacks(at: [repoRoot.appendingPathComponent("rules/posture").path], source: .user)
+        let facts = postureFacts()
+        let report = PostureEngine.evaluate(packs, facts: facts)
+        let (plan, skips) = Planner.plan(report: report, packs: packs, facts: facts, host: host)
+        #expect(plan == nil)
+        #expect(skips.contains { $0.ruleID == "posture.core.firewall" && $0.reason.contains("user pack") })
+    }
+
+    @Test func descriptionsMustMatchTheCatalog() throws {
+        let plan = try #require(try makePlan().0)
+        let text = String(decoding: try plan.canonicalData(), as: UTF8.self)
+        #expect(text.contains("Turn on the application firewall"))
+        // Still canonical JSON, but the text the user would review and approve no longer matches the action.
+        let forged = Data(text.replacingOccurrences(of: "Turn on the application firewall", with: "Clear the font cache").utf8)
+        #expect(throws: PlanError.self) { try Plan.decodeCanonical(forged) }
+        let otherFact = Data(text.replacingOccurrences(of: #""fact":"firewall.globalState""#, with: #""fact":"sip.status""#).utf8)
+        #expect(throws: PlanError.self) { try Plan.decodeCanonical(otherFact) }
+        let empty = try Plan(id: "x", createdAt: 1, expiresAt: 2, host: host, items: []).canonicalData()
+        #expect(throws: PlanError.self) { try Plan.decodeCanonical(empty) }
+    }
+
     @Test func hexParsingIsStrict() {
         #expect(Data(hexString: "00ff10") == Data([0x00, 0xFF, 0x10]))
         #expect(Data(hexString: "00FF") == Data([0x00, 0xFF]))
@@ -163,6 +186,16 @@ struct ApprovalTests {
         #expect(ApprovalPayload.parse(Data("farrier-plan-approval-v2".utf8) + payload.dropFirst(24)) == nil)
         // A slice that doesn't start at index 0 parses the same.
         #expect(ApprovalPayload.parse((Data([0]) + payload).dropFirst()) == parsed)
+    }
+
+    @Test func outstandingGrantsKeepTheHelperAlive() {
+        let book = ApprovalBook(ttl: 300)
+        #expect(!book.hasOutstanding(now: 1000))
+        let grant = book.issue(planHash: Data(repeating: 1, count: 32), now: 1000)
+        #expect(book.hasOutstanding(now: 1299))
+        #expect(!book.hasOutstanding(now: 1300))
+        _ = book.consume(Data(hexString: grant.nonce)!)
+        #expect(!book.hasOutstanding(now: 1000))
     }
 
     @Test func validApprovalPassesOnce() throws {
@@ -241,6 +274,28 @@ struct JournalTests {
 
     func record(_ n: Int) -> JournalRecord {
         JournalRecord(time: Int64(1_800_000_000 + n), actor: "cli", planID: "p\(n)", planHash: "h", outcome: "applied", detail: "n=\(n)")
+    }
+
+    @Test func concurrentAppendsKeepTheChain() throws {
+        let j = temp()
+        defer { try? FileManager.default.removeItem(at: j.url.deletingLastPathComponent()) }
+        let journal = j
+        DispatchQueue.concurrentPerform(iterations: 24) { n in
+            try? journal.append(JournalRecord(time: Int64(n), actor: "cli", planID: "p\(n)", planHash: "h", outcome: "applied"))
+        }
+        #expect(try j.entries().count == 24)
+        #expect(j.verify().isEmpty)
+    }
+
+    @Test func aCorruptJournalIsNotAppendedTo() throws {
+        let j = temp()
+        defer { try? FileManager.default.removeItem(at: j.url.deletingLastPathComponent()) }
+        try j.append(record(1))
+        let handle = try FileHandle(forWritingTo: j.url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("garbage\n".utf8))
+        try handle.close()
+        #expect(throws: PlanError.self) { try j.append(record(2)) }
     }
 
     @Test func chainVerifiesAndDetectsTampering() throws {

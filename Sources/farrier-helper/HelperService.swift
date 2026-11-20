@@ -16,7 +16,13 @@ final class Lifecycle: @unchecked Sendable {
     private let idleTimeout: TimeInterval
     private var timer: DispatchSourceTimer?
 
-    init(idleTimeout: TimeInterval) { self.idleTimeout = idleTimeout }
+    /// Returns true while the helper must not exit even when idle (an approval grant is outstanding).
+    private let keepAlive: () -> Bool
+
+    init(idleTimeout: TimeInterval, keepAlive: @escaping () -> Bool = { false }) {
+        self.idleTimeout = idleTimeout
+        self.keepAlive = keepAlive
+    }
 
     func connectionOpened() { lock.withLock { openConnections += 1; lastActivity = Date() } }
     func connectionClosed() { lock.withLock { openConnections -= 1; lastActivity = Date() } }
@@ -28,7 +34,7 @@ final class Lifecycle: @unchecked Sendable {
         t.setEventHandler { [weak self] in
             guard let self else { return }
             let idle = self.lock.withLock { self.openConnections <= 0 && Date().timeIntervalSince(self.lastActivity) > self.idleTimeout }
-            if idle {
+            if idle && !self.keepAlive() {
                 helperLog("idle for \(Int(self.idleTimeout)) s, exiting")
                 exit(0)
             }
@@ -39,7 +45,7 @@ final class Lifecycle: @unchecked Sendable {
 
     /// The client runs a different version: reply first, then exit so launchd starts the installed binary.
     func exitSoonForVersionMismatch(_ clientVersion: String) {
-        helperLog("client version \(clientVersion) != helper \(FarrierVersion.string), exiting after reply")
+        helperLog("client version \(clientVersion) != helper \(HelperConstants.handshakeVersion), exiting after reply")
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { exit(0) }
     }
 }
@@ -53,7 +59,7 @@ final class HelperService: NSObject, FarrierHelperProtocol {
     /// Handshake: returns `willExit = true` and exits shortly after if the client is another version.
     private func handshake(_ clientVersion: String) -> Bool {
         lifecycle.touch()
-        guard clientVersion != FarrierVersion.string else { return false }
+        guard clientVersion != HelperConstants.handshakeVersion else { return false }
         lifecycle.exitSoonForVersionMismatch(clientVersion)
         return true
     }
@@ -117,11 +123,20 @@ extension HelperService {
         FileManager.default.contents(atPath: HelperConstants.approvalKeyPath)
     }
 
+    /// Appends to the helper's journal. Returns the error, if any: callers that change the Mac must not go on
+    /// without a record (a full disk or a damaged journal stops remediation).
+    @discardableResult
     private static func record(_ planID: String, _ planHash: String, _ outcome: String, ruleID: String? = nil,
-                               action: String? = nil, detail: String? = nil) {
+                               action: String? = nil, detail: String? = nil) -> Error? {
         let r = JournalRecord(time: Int64(Date().timeIntervalSince1970), actor: "helper", planID: planID, planHash: planHash,
                               ruleID: ruleID, action: action, outcome: outcome, detail: detail)
-        do { try journal.append(r) } catch { helperLog("journal append failed: \(error)") }
+        do {
+            try journal.append(r)
+            return nil
+        } catch {
+            helperLog("journal append failed: \(error)")
+            return error
+        }
     }
 
     func approvalKeyStatus(clientVersion: String, reply: @escaping (Data) -> Void) {
@@ -205,15 +220,23 @@ extension HelperService {
         case .failure(let error): return refuse(error.description)
         case .success(let p): approved = p
         }
-        Self.record(approved.id, hashHex, "approved", detail: "\(approved.items.count) item(s), \(approved.tier.rawValue)")
+        if let error = Self.record(approved.id, hashHex, "approved", detail: "\(approved.items.count) item(s), \(approved.tier.rawValue)") {
+            return reply(HelperWire.encode(ApplyReply(planID: approved.id, results: [],
+                                                      error: "nothing changed: the helper's journal can't be written (\(error))")))
+        }
 
         var results: [ItemResult] = []
         for item in approved.items {
             lifecycle.touch()
             let r = Remediator.apply(item)
             helperLog("plan \(approved.id) \(item.action): \(r.outcome.rawValue) \(r.detail ?? "")")
-            Self.record(approved.id, hashHex, r.outcome.rawValue, ruleID: item.ruleID, action: item.action, detail: r.detail)
             results.append(r)
+            if let error = Self.record(approved.id, hashHex, r.outcome.rawValue, ruleID: item.ruleID, action: item.action, detail: r.detail) {
+                // The change is done but unrecorded: say so, and change nothing more.
+                let left = approved.items.count - results.count
+                return reply(HelperWire.encode(ApplyReply(planID: approved.id, results: results,
+                                                          error: "the helper's journal can't be written (\(error)); \(left) remaining item(s) not applied")))
+            }
         }
         reply(HelperWire.encode(ApplyReply(planID: approved.id, results: results, error: nil)))
     }

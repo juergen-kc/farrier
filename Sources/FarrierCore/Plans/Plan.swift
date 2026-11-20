@@ -73,6 +73,20 @@ public struct Plan: Codable, Sendable, Equatable {
         guard try plan.canonicalData() == data else { throw PlanError("plan is not in canonical form") }
         guard plan.format == currentFormat else { throw PlanError("unsupported plan format \(plan.format)") }
         guard plan.tier == (plan.items.map(\.tier).max() ?? .t0) else { throw PlanError("plan tier does not match its items") }
+        guard !plan.items.isEmpty else { throw PlanError("plan has no items") }
+        // Everything shown to the user (listing, prompt) must come from the catalog, not from the file: a process
+        // that can edit a saved plan must not be able to describe one change and have another approved.
+        for item in plan.items {
+            guard let action = RemediationCatalog.action(item.action) else {
+                throw PlanError("unknown action `\(item.action)`")
+            }
+            guard item.tier == action.tier else {
+                throw PlanError("`\(item.action)` is \(action.tier.rawValue), but the plan says \(item.tier.rawValue)")
+            }
+            guard item.summary == action.summary, item.fact == action.fact else {
+                throw PlanError("`\(item.action)`'s description in the plan does not match Farrier's")
+            }
+        }
         return plan
     }
 
@@ -129,9 +143,13 @@ public enum Planner {
     public static func plan(report: PostureReport, packs: [RulePack], facts: FactStore, ruleIDs: Set<String>? = nil,
                             host: String, now: Date = Date(), ttl: Int64 = Plan.defaultTTL,
                             id: String = UUID().uuidString.lowercased()) -> (plan: Plan?, skipped: [PlanSkip]) {
+        // Only packs that ship with Farrier can lead to a change; user packs can report, never fix.
         var rules: [String: CheckRule] = [:]
+        var fromUserPacks: Set<String> = []
         for pack in packs {
-            for case .check(let rule) in pack.rules { rules[rule.id] = rule }
+            for case .check(let rule) in pack.rules {
+                if pack.source == .bundled { rules[rule.id] = rule } else { fromUserPacks.insert(rule.id) }
+            }
         }
         var items: [PlanItem] = []
         var skipped: [PlanSkip] = []
@@ -164,6 +182,10 @@ public enum Planner {
                     reason = "no automatic fix: \(finding.guidance?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "see the rule's guidance")"
                 }
                 skipped.append(PlanSkip(ruleID: finding.ruleID, reason: reason))
+                continue
+            }
+            if fromUserPacks.contains(finding.ruleID) && rules[finding.ruleID] == nil {
+                skipped.append(PlanSkip(ruleID: finding.ruleID, reason: "the rule comes from a user pack; only Farrier's own packs can plan fixes"))
                 continue
             }
             guard let rule = rules[finding.ruleID], let actionID = rule.remediation.action,

@@ -61,7 +61,7 @@ struct PlanPosture: ParsableCommand {
     @Option(name: .customLong("rule"), help: "Only these rule ids (repeatable). Default: every fixable failure.")
     var ruleIDs: [String] = []
 
-    @Option(name: .customLong("rules"), help: "Rule pack files or directories. Default: the packs bundled with Farrier.app, or ./rules.")
+    @Option(name: .customLong("rules"), help: "Rule packs to use instead, loaded as user packs (which can't plan fixes). Default: the packs bundled with Farrier.app, or ./rules.")
     var rulePaths: [String] = []
 
     @Option(help: "JSON file with facts to use instead of collecting (for testing; such a plan only applies if the facts match this Mac).")
@@ -71,7 +71,11 @@ struct PlanPosture: ParsableCommand {
     var json = false
 
     func run() throws {
-        let (packs, loadIssues) = RuleLinter.loadPacks(at: rulePaths.isEmpty ? defaultRulePaths() : rulePaths, source: .bundled)
+        // Packs given on the command line are user packs: they can't declare automatic fixes, and the planner
+        // never plans from them. Only the packs that ship with Farrier (or ./rules in a checkout) can.
+        let (packs, loadIssues) = rulePaths.isEmpty
+            ? RuleLinter.loadPacks(at: defaultRulePaths(), source: .bundled)
+            : RuleLinter.loadPacks(at: rulePaths, source: .user)
         let errors = (loadIssues + RuleLinter.lint(packs)).filter { $0.level == .error }
         guard errors.isEmpty else {
             for e in errors { note("\(e)") }
@@ -173,6 +177,10 @@ struct Apply: ParsableCommand {
                                                       planHash: hash, ruleID: r.ruleID, action: r.action,
                                                       outcome: r.outcome.rawValue, detail: r.detail))
                 if r.outcome == .failed || r.outcome == .refused { failed = true }
+            }
+            if let error = reply.error {
+                note("stopped: \(error)")
+                failed = true
             }
             if failed { throw ExitCode(1) }
         } catch let error as ExitCode {

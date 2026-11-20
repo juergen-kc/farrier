@@ -63,6 +63,14 @@ public final class ApprovalBook: @unchecked Sendable {
         return ApprovalGrant(nonce: nonce.hexString, expiresAt: expiresAt)
     }
 
+    /// Is any grant still unexpired? The helper stays running while one is, so a user who takes a while at the
+    /// prompt doesn't find their approval gone with an idle-exited helper.
+    public func hasOutstanding(now: Int64) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return issued.values.contains { $0.expiresAt > now }
+    }
+
     /// Removes and returns the nonce's record. Every submission consumes its nonce, valid or not.
     public func consume(_ nonce: Data) -> (planHash: Data, expiresAt: Int64)? {
         lock.lock()
