@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- LaunchDaemon definition registered by SMAppService.daemon(plistName:).
+     Shipped at FarrierSpike.app/Contents/Library/LaunchDaemons/dev.farrier.spike.helper.plist -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.farrier.spike.helper</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/farrier-spike-helper</string>
+	<key>MachServices</key>
+	<dict>
+		<key>dev.farrier.spike.helper</key>
+		<true/>
+	</dict>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>dev.farrier.spike.app</string>
+	</array>
+	<key>StandardErrorPath</key>
+	<string>/Library/Logs/farrier-spike-helper.log</string>
+</dict>
+</plist>

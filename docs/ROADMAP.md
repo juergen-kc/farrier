@@ -15,6 +15,7 @@ needs to be retrofitted.
 - [ ] `SMAppService` daemon registration, approval in System Settings, and `setCodeSigningRequirement` on both
       ends of the XPC connection. Also: the console-session check for approvals (finding F4), and enrolling the
       approval key with admin authorization.
+      Code and test checklist: [spikes/smappservice-xpc](../spikes/smappservice-xpc/).
 - [ ] Swift MCP SDK: stdio, output schemas, annotations, and Tasks extension support for the 2026-07-28 spec.
 - [ ] Signing and notarization pipeline in GitHub Actions, plus a Homebrew cask.
 - [ ] Fixture capture script for Apple CLI outputs on macOS 14, 15, and 26.
