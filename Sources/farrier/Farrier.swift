@@ -9,9 +9,9 @@ struct Farrier: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "farrier",
         abstract: "Keep your Mac sound: hygiene, posture, drift, patching and debugging.",
-        discussion: "v0.1 foundation: rule packs and posture evaluation. Collectors, the privileged helper and the MCP server follow.",
+        discussion: "v0.1: rule packs, unprivileged fact collection and posture evaluation. The privileged helper and the MCP server follow.",
         version: version,
-        subcommands: [Rules.self, Posture.self]
+        subcommands: [Posture.self, Facts.self, Rules.self]
     )
 }
 
@@ -81,14 +81,14 @@ struct Rules: ParsableCommand {
 struct Posture: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Evaluate posture checks.",
-        discussion: "Until the macOS collectors land, facts come from a JSON file (--facts). See examples/facts-sample.json."
+        discussion: "Collects facts from this Mac (read-only, unprivileged) unless --facts gives a JSON file instead. Facts that need the privileged helper are reported as unknown for now."
     )
 
     @Option(name: .customLong("rules"), help: "Rule pack files or directories.")
     var rulePaths: [String] = ["rules"]
 
-    @Option(help: "JSON file with collected facts: { \"<fact id>\": <value>, … }")
-    var facts: String
+    @Option(help: "JSON file with facts to use instead of collecting: { \"<fact id>\": <value>, … }")
+    var facts: String?
 
     @Flag(help: "Output JSON.")
     var json = false
@@ -101,7 +101,12 @@ struct Posture: ParsableCommand {
             for e in errors { FileHandle.standardError.write(Data("\(e)\n".utf8)) }
             throw ExitCode(2)
         }
-        let store = try StaticFactStore(json: Data(contentsOf: URL(fileURLWithPath: facts)))
+        let store: StaticFactStore
+        if let facts {
+            store = try StaticFactStore(json: Data(contentsOf: URL(fileURLWithPath: facts)))
+        } else {
+            store = StaticFactStore(SystemCollectors().collect())
+        }
         let report = PostureEngine.evaluate(packs, facts: store)
 
         if json {
@@ -117,13 +122,53 @@ struct Posture: ParsableCommand {
             }
             var line = "\(mark)  \(f.severity.rawValue.padding(toLength: 8, withPad: " ", startingAt: 0)) \(f.ruleID)"
             if f.managed { line += "  [managed by \(f.managedBy ?? "MDM")]" }
-            if f.managementUnknown { line += "  [MDM profiles not checked]" }
+            if f.fixable { line += "  [fixable]" }
+            if f.managementUnknown && f.status != .pass { line += "  [MDM profiles not checked]" }
             print(line)
             if let reason = f.reason { print("      \(reason)") }
         }
         let s = report.summary
         print("\(s["pass"] ?? 0) passed, \(s["fail"] ?? 0) failed, \(s["unknown"] ?? 0) unknown, \(s["managed"] ?? 0) managed by MDM")
     }
+}
+
+// MARK: - farrier facts
+
+struct Facts: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Collect facts from this Mac and show them, with the reason for any that are missing.",
+        discussion: "Read-only and unprivileged. Use --save to write a fact file for `farrier posture --facts` or for test fixtures."
+    )
+
+    @Flag(help: "Output JSON (facts and collection notes).")
+    var json = false
+
+    @Option(help: "Also write the facts (only) as JSON to this file.")
+    var save: String?
+
+    func run() throws {
+        let result = SystemCollectors().collect()
+        if let save {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+            try encoder.encode(result.facts).write(to: URL(fileURLWithPath: save))
+        }
+        if json {
+            try Output.json(FactsReport(facts: result.facts, notes: result.notes))
+            return
+        }
+        for note in result.notes.sorted(by: { $0.fact < $1.fact }) {
+            let value = result.facts[note.fact].map(\.description) ?? "—"
+            var line = "\(note.status.rawValue.padding(toLength: 11, withPad: " ", startingAt: 0)) \(note.fact) = \(value)"
+            if let detail = note.detail { line += "   (\(detail))" }
+            print(line)
+        }
+    }
+}
+
+struct FactsReport: Encodable {
+    let facts: [String: FactValue]
+    let notes: [CollectionNote]
 }
 
 // MARK: - Output

@@ -15,7 +15,7 @@ There is no GUI. You drive it by typing commands, or by asking an agent:
 > "What changed on this Mac since last Monday?"
 
 > **Status:** early development (v0.1 in progress). The design is validated by three spikes (`spikes/`). What runs
-> today: the rule-pack loader and linter, and posture evaluation against a fact file. The macOS collectors, the
+> today: the rule-pack loader and linter, unprivileged fact collection, and posture evaluation. The macOS collectors, the
 > privileged helper and the MCP server come next. The interface below is the target.
 
 ---
@@ -63,12 +63,20 @@ blast radius. Every change is:
 Requires Swift 6.1 or later (Xcode 16.3+ on macOS, or a Swift toolchain on Linux).
 
 ```bash
-swift run farrier rules lint rules
+swift run farrier facts
 ```
 
 ```bash
-swift run farrier posture --facts examples/facts-sample.json
+swift run farrier posture
 ```
+
+```bash
+swift run farrier rules lint rules
+```
+
+`farrier facts` and `farrier posture` read this Mac's settings without privileges. Facts that need the helper show
+as unknown for now (see [docs/FACTS.md](docs/FACTS.md)). On Linux, or to test rules, use
+`swift run farrier posture --facts examples/facts-sample.json`.
 
 ## A quick look (planned interface)
 

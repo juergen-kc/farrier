@@ -35,6 +35,9 @@ needs to be retrofitted.
 Done:
 - [x] Package layout, CI (Linux and macOS), `FarrierCore` with the rule-pack parser, linter (schema, protected
       paths, user-pack limits) and posture engine; `farrier rules lint|list` and `farrier posture --facts`
+- [x] Unprivileged (T0) collectors: OS version, FileVault, SIP, Gatekeeper, firewall, MDM enrollment, software
+      update settings; `farrier facts`, live `farrier posture`; golden parser tests; CI runs collection on a real
+      macOS runner (docs/FACTS.md)
 
 To do:
 - Helper lifecycle: a version handshake (a mismatched helper exits after replying) and an idle exit

@@ -28,6 +28,8 @@ public enum CoreFacts {
     public static let profilePayloadTypes = "mdm.payloadTypes"
     /// Active Declarative Device Management configuration types (list of strings).
     public static let declarationTypes = "mdm.declarationTypes"
+    /// MDM enrollment state: { dep, mdm, userApproved }.
+    public static let enrollment = "mdm.enrollment"
 }
 
 public struct Finding: Sendable, Codable, Hashable {

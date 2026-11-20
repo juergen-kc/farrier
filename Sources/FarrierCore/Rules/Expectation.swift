@@ -90,7 +90,9 @@ public indirect enum Expectation: Sendable, Hashable {
         default:
             break
         }
-        guard let value else { return .fail("value is missing") }
+        // A value that isn't there is "can't tell", not "fails": Apple often omits a setting and uses its default.
+        // Only an explicit `exists` check (handled above) decides on absence.
+        guard let value else { return .unknown("value is not set") }
 
         switch self {
         case .equals(let expected):
