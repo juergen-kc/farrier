@@ -54,7 +54,7 @@ What the user sees (X2):
 | Test | Result | notes |
 |---|---|---|
 | X15 key-create, no prompt | ✅ | |
-| X16 key-acl integrityOK | ✅ ACL / ❌ check bug | The access list is exactly as intended: Decrypt/Derive/Export/MAC/**Sign** trust only `/Applications/FarrierSpike.app`; Encrypt, Integrity and PartitionID: any app; **ChangeACL: no app** (`[]`). The check reported `integrityOK: false` because the keychain records the **bundle path**, while the check compared against the executable path. Fixed in the next commit (both paths count as self). |
+| X16 key-acl integrityOK | ✅ (after fix) | The access list is exactly as intended: Decrypt/Derive/Export/MAC/**Sign** trust only `/Applications/FarrierSpike.app`; Encrypt, Integrity and PartitionID: any app; **ChangeACL: no app** (`[]`). The check reported `integrityOK: false` because the keychain records the **bundle path**, while the check compared against the executable path. Fixed (both paths count as self); after the update: `integrityOK: true`, `foreignTrustedApps: []`. |
 | X17 enroll: admin dialog | ✅ | Dialog: **"enroll a Farrier approval key — Enter your password to continue with 'FarrierSpike'."** It's credited to the **client app** (not the helper), appears in the user's session, and the user name is prefilled. The text is the right's `default-prompt`. A second enroll asked again (no silent credential reuse). Fingerprints match. No separate Touch ID or password prompt for loading the key. |
 | X18 key file root:wheel 0644 | ✅ (group admin) | `-rw-r--r-- root admin`. The group is inherited from `/Library/Application Support`; the product should set `root:wheel` explicitly. |
 | X19 cancel → refused | ✅ | `authStatus: -60006` (errAuthorizationCanceled) |
@@ -76,15 +76,15 @@ What the user sees (X2):
 
 | Test | Result | notes |
 |---|---|---|
-| X28 "Always Allow" detected | | |
+| X28 "Always Allow" detected | ✅ | After "Always Allow" for `security find-generic-password -w`, the Decrypt/Sign entry trusts `/usr/bin/security` too; `key-acl` reports `integrityOK: false`, `foreignTrustedApps: ["/usr/bin/security"]`. **Also:** `security` printed the key **blob**. Whoever holds the blob can use the key from any process (as in Approach A, F1). The keychain protects reading the blob, not using it, and user presence is still required per signature. **Design rule: a failed integrity check means rotating the key (delete, create, re-enroll with admin approval), not just warning.** Done here: new key, re-enrolled, `integrityOK: true`. |
 
 ## 7. Updates
 
 | Test | Result | notes |
 |---|---|---|
-| X29 status after update | | |
-| X29 new helper answers | | kickstart needed? |
-| X29 key and enrollment kept | | |
+| X29 status after update | ✅ | still `enabled` after reinstalling a new build (client, helper and version changed). No new approval, no notification noticed. |
+| X29 new helper answers | ⚠️ **no, until restarted** | `ping` after the update still returned `helperPid` (old key) from pid 13324: **the old helper process keeps running**. `sudo launchctl kickstart -k system/dev.farrier.spike.helper` started the new one (log: "starting pid=15170", "right … exists"). **Product:** the client sends its version; on a mismatch, the helper replies and then exits so launchd starts the new binary on the next connection. The helper also exits when idle. |
+| X29 key and enrollment kept | ✅ | `approve` succeeded after the update. The new client read the key (the keychain access list still trusts it), and the enrollment was kept. |
 
 ## Conclusions
 
