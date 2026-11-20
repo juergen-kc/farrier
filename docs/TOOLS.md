@@ -8,6 +8,9 @@ Every tool:
   `readOnlyHint` (T0/T1), `destructiveHint` (T3/T4), `idempotentHint`, and `openWorldHint` (true only
   for adapter and update tools that reach the network)
 - labels untrusted strings (file names, log text, app metadata) as data
+- sets an annotation **title**: Claude Code shows the annotation title, not the tool title
+- reads anything root-only or TCC-protected through the helper (T1), never in the MCP server process itself
+- sends progress notifications during long work, when the client provides a `progressToken`
 
 Tools that **change** something never act directly. They return a plan, and `apply_plan` executes it,
 with on-device approval for T3 and T4.

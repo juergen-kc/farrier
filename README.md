@@ -77,8 +77,12 @@ claude mcp add farrier -- farrier mcp
 
 - macOS 14 Sonoma or later. Apple silicon is the primary target, and Intel is best-effort.
 - Distributed as a signed, notarized `Farrier.app` bundle (no UI), which contains the CLI
-  and the privileged helper. Install with Homebrew (`brew install --cask farrier`) or download
-  the bundle from GitHub Releases.
+  and the privileged helper. Install with Homebrew (`brew install --cask farrier`, which also adds the
+  `farrier` command) or download the bundle from GitHub Releases.
+- On first setup, macOS asks you to allow Farrier's background helper ("App Background Activity"), and Farrier
+  asks for an admin password once, to enroll its approval key. For posture checks that touch privacy-protected
+  data, you also give Farrier **Full Disk Access** once. Only its root helper uses that access, never the
+  terminal or AI client it runs in.
 
 ## Documentation
 
