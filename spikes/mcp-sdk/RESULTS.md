@@ -56,7 +56,7 @@ FDA held by (record per state): Terminal / Claude / FarrierSpike
 | C | helper | | | | | |
 | C | via Claude Code | | | | | |
 
-**Baseline run (before changing any FDA setting; which apps held FDA: to be confirmed, probably Terminal):**
+**Baseline = state C (FDA on: Terminal, Claude desktop app, sshd-keygen-wrapper; off: FarrierSpike (listed, presumably auto-added after an earlier denial), `claude` CLI, `2.1.234`):**
 
 | Probe | TCC.db | Safari | Mail | Messages | Caches |
 |---|---|---|---|---|---|
@@ -65,7 +65,7 @@ FDA held by (record per state): Terminal / Claude / FarrierSpike
 | MCP server via Claude Code | ✅ | ✅ | ✅ | ✅ | ✅ |
 | helper via Claude Code | ❌ EPERM | ❌ EPERM | ❌ EPERM | ❌ EPERM | ✅ |
 
-So far: **root does not bypass TCC.** Without its own grant, the helper is denied every FDA location. The CLI and the MCP server read everything because an app higher in their process chain (presumably Terminal) holds FDA.
+So far: **root does not bypass TCC.** Without its own grant, the helper is denied every FDA location. The CLI and the MCP server read everything because an app higher in their process chain (Terminal) holds FDA. Note: `sshd-keygen-wrapper` with FDA means SSH sessions also get Full Disk Access on this machine.
 
 M14 user-folder dialog names:
 
