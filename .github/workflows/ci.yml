@@ -95,3 +95,6 @@ jobs:
           test -x build/Farrier.app/Contents/MacOS/farrier-helper
           plutil -lint build/Farrier.app/Contents/Info.plist build/Farrier.app/Contents/Library/LaunchDaemons/dev.farrier.helper.plist
           build/Farrier.app/Contents/MacOS/farrier helper status
+          # The bundled rule packs work from any directory.
+          (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/build/Farrier.app/Contents/MacOS/farrier" rules lint)
+          (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/build/Farrier.app/Contents/MacOS/farrier" posture)

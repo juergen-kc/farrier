@@ -16,7 +16,7 @@ VERSION=$(sed -n 's/.*static let string = "\(.*\)".*/\1/p' Sources/FarrierCore/V
 OUT=build
 APP="$OUT/Farrier.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Library/LaunchDaemons"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Library/LaunchDaemons" "$APP/Contents/Resources"
 
 swift build -c release --product farrier
 swift build -c release --product farrier-helper
@@ -25,6 +25,8 @@ BIN="$(swift build -c release --show-bin-path)"
 cp "$BIN/farrier" "$BIN/farrier-helper" "$APP/Contents/MacOS/"
 sed "s/__VERSION__/$VERSION/g" Packaging/Info.plist > "$APP/Contents/Info.plist"
 cp Packaging/dev.farrier.helper.plist "$APP/Contents/Library/LaunchDaemons/"
+# The bundled rule packs, sealed by the signature: the installed CLI uses them when no --rules path is given.
+cp -R rules "$APP/Contents/Resources/rules"
 
 SIGN_ARGS=(--force --sign "$SIGN_IDENTITY" --options runtime)
 [[ "$SIGN_IDENTITY" != "-" ]] && SIGN_ARGS+=(--timestamp)  # timestamps need a real identity

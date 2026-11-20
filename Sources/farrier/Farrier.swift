@@ -27,8 +27,8 @@ struct Rules: ParsableCommand {
     struct Lint: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Validate rule packs (schema, safety, protected paths).")
 
-        @Argument(help: "Rule pack files or directories.")
-        var paths: [String] = ["rules"]
+        @Argument(help: "Rule pack files or directories. Default: the packs bundled with Farrier.app, or ./rules.")
+        var paths: [String] = []
 
         @Flag(help: "Treat the packs as user packs, with the stricter user-pack rules.")
         var user = false
@@ -38,7 +38,7 @@ struct Rules: ParsableCommand {
 
         func run() throws {
             let source: RulePack.Source = user ? .user : .bundled
-            let (packs, loadIssues) = RuleLinter.loadPacks(at: paths, source: source)
+            let (packs, loadIssues) = RuleLinter.loadPacks(at: paths.isEmpty ? defaultRulePaths() : paths, source: source)
             let issues = loadIssues + RuleLinter.lint(packs)
             let errors = issues.filter { $0.level == .error }.count
 
@@ -56,14 +56,14 @@ struct Rules: ParsableCommand {
     struct List: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "List the rules in the given packs.")
 
-        @Argument(help: "Rule pack files or directories.")
-        var paths: [String] = ["rules"]
+        @Argument(help: "Rule pack files or directories. Default: the packs bundled with Farrier.app, or ./rules.")
+        var paths: [String] = []
 
         @Flag(help: "Output JSON.")
         var json = false
 
         func run() throws {
-            let (packs, issues) = RuleLinter.loadPacks(at: paths, source: .bundled)
+            let (packs, issues) = RuleLinter.loadPacks(at: paths.isEmpty ? defaultRulePaths() : paths, source: .bundled)
             for issue in issues where issue.level == .error { FileHandle.standardError.write(Data("\(issue)\n".utf8)) }
             let rows = packs.flatMap { pack in
                 pack.rules.map { RuleSummary(pack: pack.id, id: $0.id, kind: $0.kind, title: $0.title) }
@@ -77,6 +77,16 @@ struct Rules: ParsableCommand {
     }
 }
 
+/// Rule packs when no path is given: those bundled in Farrier.app (`Contents/Resources/rules`) when running from
+/// the app, so the installed CLI works from any directory; otherwise `./rules` (a checkout).
+func defaultRulePaths() -> [String] {
+    if Bundle.main.bundlePath.hasSuffix(".app"), let resources = Bundle.main.resourceURL {
+        let bundled = resources.appendingPathComponent("rules")
+        if FileManager.default.fileExists(atPath: bundled.path) { return [bundled.path] }
+    }
+    return ["rules"]
+}
+
 // MARK: - farrier posture
 
 struct Posture: ParsableCommand {
@@ -85,8 +95,8 @@ struct Posture: ParsableCommand {
         discussion: "Collects facts from this Mac (read-only, unprivileged) unless --facts gives a JSON file instead. Facts that need the privileged helper are reported as unknown for now."
     )
 
-    @Option(name: .customLong("rules"), help: "Rule pack files or directories.")
-    var rulePaths: [String] = ["rules"]
+    @Option(name: .customLong("rules"), help: "Rule pack files or directories. Default: the packs bundled with Farrier.app, or ./rules.")
+    var rulePaths: [String] = []
 
     @Option(help: "JSON file with facts to use instead of collecting: { \"<fact id>\": <value>, … }")
     var facts: String?
@@ -95,7 +105,7 @@ struct Posture: ParsableCommand {
     var json = false
 
     func run() throws {
-        let (packs, loadIssues) = RuleLinter.loadPacks(at: rulePaths, source: .bundled)
+        let (packs, loadIssues) = RuleLinter.loadPacks(at: rulePaths.isEmpty ? defaultRulePaths() : rulePaths, source: .bundled)
         // The same checks as `farrier rules lint`: duplicate ids and the like must stop evaluation too.
         let errors = (loadIssues + RuleLinter.lint(packs)).filter { $0.level == .error }
         guard errors.isEmpty else {
