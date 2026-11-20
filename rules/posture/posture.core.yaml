@@ -54,7 +54,7 @@ rules:
     kind: check
     severity: medium
     collect: { fact: firewall.globalState }
-    expect: { in: [on, blockAll] }
+    expect: { in: ["on", "blockAll"] }   # quoted: unquoted on/off are booleans in YAML 1.1
     managedBy:
       - payloadType: com.apple.security.firewall
     remediation:

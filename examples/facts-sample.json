@@ -1,0 +1,24 @@
+{
+  "filevault.status": "On",
+  "sip.status": "enabled",
+  "firewall.globalState": "off",
+  "softwareupdate.prefs": {
+    "AutomaticCheckEnabled": true,
+    "CriticalUpdateInstall": true,
+    "ConfigDataInstall": false
+  },
+  "launchd.items": [
+    {
+      "label": "com.example.updater",
+      "path": "/Library/LaunchDaemons/com.example.updater.plist",
+      "signature": { "valid": true, "notarized": true, "teamID": "ABCDE12345" }
+    },
+    {
+      "label": "com.sketchy.agent",
+      "path": "~/Library/LaunchAgents/com.sketchy.agent.plist",
+      "signature": { "valid": true, "notarized": false, "teamID": null }
+    }
+  ],
+  "mdm.payloadTypes": [],
+  "mdm.declarationTypes": ["com.apple.configuration.softwareupdate.settings"]
+}

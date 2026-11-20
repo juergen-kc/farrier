@@ -14,7 +14,9 @@ There is no GUI. You drive it by typing commands, or by asking an agent:
 > "Is this machine CIS level 1 compliant? Fix what's safe to fix."
 > "What changed on this Mac since last Monday?"
 
-> **Status:** design phase. These docs describe the intended system. Nothing here runs yet.
+> **Status:** early development (v0.1 in progress). The design is validated by three spikes (`spikes/`). What runs
+> today: the rule-pack loader and linter, and posture evaluation against a fact file. The macOS collectors, the
+> privileged helper and the MCP server come next. The interface below is the target.
 
 ---
 
@@ -55,6 +57,18 @@ blast radius. Every change is:
    [Privacy](docs/THREAT_MODEL.md#privacy-what-leaves-the-machine).)
 5. **The CLI is the product.** MCP is a thin layer over it, and everything an agent can do,
    you can do in a terminal with `--json`.
+
+## Try it (today)
+
+Requires Swift 6.1 or later (Xcode 16.3+ on macOS, or a Swift toolchain on Linux).
+
+```bash
+swift run farrier rules lint rules
+```
+
+```bash
+swift run farrier posture --facts examples/facts-sample.json
+```
 
 ## A quick look (planned interface)
 

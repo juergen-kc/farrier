@@ -20,7 +20,9 @@ Thanks for helping. There are three main ways to contribute, from easiest to har
 
 ## Development
 
-Planned. This assumes Xcode 16+ and macOS 14+.
+Requires Swift 6.1 or later: Xcode 16.3+ on macOS 14+, or a Swift toolchain on Linux. `FarrierCore` and the
+CLI build on Linux; the macOS-only parts (collectors, helper, MCP server) will be separate targets. CI runs on
+both (`.github/workflows/ci.yml`).
 
 ```bash
 swift build
@@ -31,11 +33,18 @@ swift test
 ```
 
 ```bash
-swift run farrier rules lint rules/
+swift run farrier rules lint rules
 ```
 
-The helper needs a signed build to register with `SMAppService`. See `scripts/dev-sign.sh`
-(planned) for a local development signing identity.
+```bash
+swift run farrier posture --facts examples/facts-sample.json
+```
+
+Tests use Swift Testing (`import Testing`). Every rule-pack behaviour, and especially every safety rule (protected
+paths, user-pack limits), needs a test in `Tests/FarrierCoreTests`.
+
+The helper will need a signed build to register with `SMAppService` (planned: `scripts/dev-sign.sh`). Until then,
+see `spikes/smappservice-xpc/` for how signing and installation work.
 
 ## Pull requests
 
