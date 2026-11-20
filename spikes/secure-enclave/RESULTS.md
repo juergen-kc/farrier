@@ -37,7 +37,7 @@ Fill this in while working through [CHECKLIST.md](CHECKLIST.md). Pasting the JSO
 | A4 verify as root | | ✅ | | | `euid: 0`, `signatureValid: true`, `fingerprintMatches: true` |
 | A5 tamper detected | | ✅ | | | `signatureValid: false` |
 | A6 prompts on every signature | | ✅ | | | two signatures back to back: 4.79 s and 3.95 s |
-| A7 cancel error (domain/code) | | ❓ | | | first run returned `ok: true` (3.28 s), so it was approved, not cancelled. Re-run pending. |
+| A7 cancel error (domain/code) | | ✅ | | | `com.apple.LocalAuthentication` **-2** (`LAError.userCancel`, "Canceled by user."). Nothing is signed. (The first attempt was approved by mistake.) |
 | A8 expiry detected | | ✅ | | | ttl 5 s, verified after 6 s: `signatureValid: true`, `expired: true`, `ok: false` |
 
 Screenshot of the prompt:
