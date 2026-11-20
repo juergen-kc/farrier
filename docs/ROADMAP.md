@@ -55,8 +55,10 @@ Done:
       `apply` showed the password prompt with text derived from the plan ("Farrier is trying to apply Farrier plan
       c0d6f594 (T4): Turn on the application firewall") and turned the firewall on (verified by reading it back);
       applying again reported `alreadyCompliant`; over SSH, apply was refused at the first helper call, before any
-      prompt; both journals verified intact. Not yet tested: cancelling the prompt, the integrity check after
-      "Always Allow", an MDM-managed firewall.
+      prompt; both journals verified intact. After the review fixes: `setup --rotate` staged, enrolled and then
+      promoted a new key (no `group://` entry appears by default, so none is exempted), and cancelling the
+      password prompt changed nothing. Not yet tested: cancelling the admin dialog during rotation, a slow
+      (> 60 s) approval, the integrity check after "Always Allow", an MDM-managed firewall.
 
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and

@@ -1,6 +1,7 @@
 #if os(macOS)
 import FarrierCore
 import Foundation
+import LocalAuthentication
 import Security
 
 // MARK: - Helper calls for the approval key and plans
@@ -177,7 +178,12 @@ public enum PlanApplier {
             throw PlanApplyError.refused(begin.error ?? "no approval nonce")
         }
         let payload = ApprovalPayload.build(planHash: hash, nonce: nonce, expiresAt: grant.expiresAt)
-        let signature = try ApprovalKey.sign(payload, reason: promptReason(for: plan))
+        let signature: Data
+        do {
+            signature = try ApprovalKey.sign(payload, reason: promptReason(for: plan))
+        } catch let error as LAError where [.userCancel, .appCancel, .systemCancel].contains(error.code) {
+            throw PlanApplyError.notReady("the approval prompt was cancelled; nothing changed")
+        }
         let reply = try HelperClient.applyPlan(data, payload: payload, signature: signature)
         // Refused outright → throw. Stopped partway (results plus an error) → return both, so nothing done is hidden.
         if let error = reply.error, reply.results.isEmpty { throw PlanApplyError.refused(error) }
