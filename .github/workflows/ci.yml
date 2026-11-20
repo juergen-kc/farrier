@@ -1,0 +1,48 @@
+name: CI
+
+# Runs on every push (any branch). The checks attach to the commit, so they also show up on pull requests,
+# without running twice.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # FarrierCore and the CLI are platform-independent so far, so a Linux job gives fast, cheap feedback.
+  linux:
+    name: Linux (Swift 6.1)
+    runs-on: ubuntu-latest
+    container: swift:6.1
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Register the Swift problem matcher
+        run: echo "::add-matcher::.github/swift-problem-matcher.json"
+      - run: swift --version
+      - run: swift build --build-tests
+      - run: swift test
+      - name: Lint the bundled rule packs
+        run: swift run farrier rules lint rules
+      - name: Evaluate the sample facts
+        run: swift run farrier posture --facts examples/facts-sample.json
+
+  # The product target. Later PRs add the macOS-only collectors, helper and MCP server here.
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Register the Swift problem matcher
+        run: echo "::add-matcher::.github/swift-problem-matcher.json"
+      - run: swift --version
+      - run: swift build --build-tests
+      - run: swift test
+      - name: Lint the bundled rule packs
+        run: swift run farrier rules lint rules

@@ -32,6 +32,11 @@ needs to be retrofitted.
 
 ## v0.1: Foundation and posture
 
+Done:
+- [x] Package layout, CI (Linux and macOS), `FarrierCore` with the rule-pack parser, linter (schema, protected
+      paths, user-pack limits) and posture engine; `farrier rules lint|list` and `farrier posture --facts`
+
+To do:
 - Helper lifecycle: a version handshake (a mismatched helper exits after replying) and an idle exit
 - Approval key: setup, admin-authorized enrollment, the integrity check with automatic rotation, and the
   console-session check
