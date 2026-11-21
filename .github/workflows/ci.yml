@@ -108,6 +108,11 @@ jobs:
           test -x build/Farrier.app/Contents/MacOS/farrier
           test -x build/Farrier.app/Contents/MacOS/farrier-helper
           plutil -lint build/Farrier.app/Contents/Info.plist build/Farrier.app/Contents/Library/LaunchDaemons/dev.farrier.helper.plist
+          test -s build/Farrier.app/Contents/Resources/AppIcon.icns
+          test -x build/Farrier.app/Contents/Resources/uninstall.sh
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' build/Farrier.app/Contents/Info.plist)" = AppIcon
+          bash -n scripts/install.sh && bash -n scripts/uninstall.sh
+          ruby -c Packaging/homebrew/farrier.rb
           build/Farrier.app/Contents/MacOS/farrier helper status
           # The bundled rule packs work from any directory.
           (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/build/Farrier.app/Contents/MacOS/farrier" rules lint)

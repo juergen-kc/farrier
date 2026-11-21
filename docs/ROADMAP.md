@@ -77,11 +77,16 @@ Done:
       the prompt showed the team and reason, the rule passed with "2 accepted by exception", and the helper wrote
       `exceptions.json` as root:wheel 0644.
 
+- [x] Packaging: an app icon (`scripts/make-icon.py` → `Packaging/AppIcon.png` → `AppIcon.icns`), `scripts/install.sh`
+      (root-owned app, a `farrier` wrapper on PATH, restarts an old helper), `farrier uninstall` plus
+      `Contents/Resources/uninstall.sh` (helper registration, approval key, authorization right, app, wrapper;
+      `--purge` also journals, plans and exceptions), and a Homebrew cask template.
+
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
   Developer ID signing
-- Packaging: a root-owned `Farrier.app` with an icon; the Homebrew cask installs a `farrier` wrapper script;
-  uninstall removes the LaunchDaemon, the enrolled key and the authorization right
+- Homebrew cask: the template (`Packaging/homebrew/farrier.rb`, wrapper, root-owned app, uninstall/zap) needs the
+  signed and notarized release pipeline before it can be tested
 - Full Disk Access onboarding: detect via the helper, open the right Settings pane, and report "unknown" without it
 - MCP: progress notifications for long calls; resources (`farrier://plan/{id}`, `farrier://journal/recent`); the
   other runbook prompts; validation with Claude Desktop

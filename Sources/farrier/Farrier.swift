@@ -13,7 +13,7 @@ struct Farrier: AsyncParsableCommand {
         abstract: "Keep your Mac sound: hygiene, posture, drift, patching and debugging.",
         discussion: "v0.1: rule packs, fact collection, posture evaluation, the privileged helper, and plan → approve → apply for the first fix (firewall). `farrier mcp` serves the same over MCP (stdio).",
         version: version,
-        subcommands: [Posture.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self]
+        subcommands: [Posture.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self, Uninstall.self]
     )
 }
 

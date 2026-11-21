@@ -6,8 +6,7 @@
 #                                                                           # an ad hoc helper refuses to start
 #
 # Install (root-owned, so nothing running as the user can modify it):
-#   sudo rm -rf /Applications/Farrier.app && sudo ditto build/Farrier.app /Applications/Farrier.app \
-#     && sudo chown -R root:wheel /Applications/Farrier.app
+#   sudo ./scripts/install.sh            (root-owned app in /Applications, plus the `farrier` wrapper on PATH)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${SIGN_IDENTITY:?set SIGN_IDENTITY (security find-identity -v -p codesigning), or - for ad hoc}"
@@ -27,6 +26,16 @@ sed "s/__VERSION__/$VERSION/g" Packaging/Info.plist > "$APP/Contents/Info.plist"
 cp Packaging/dev.farrier.helper.plist "$APP/Contents/Library/LaunchDaemons/"
 # The bundled rule packs, sealed by the signature: the installed CLI uses them when no --rules path is given.
 cp -R rules "$APP/Contents/Resources/rules"
+install -m 755 scripts/uninstall.sh "$APP/Contents/Resources/uninstall.sh"
+
+# The icon: System Settings shows it in Login Items when the user decides whether to allow the helper.
+ICONSET="$OUT/AppIcon.iconset"
+rm -rf "$ICONSET" && mkdir -p "$ICONSET"
+for size in 16 32 128 256 512; do
+  sips -z $size $size Packaging/AppIcon.png --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+  sips -z $((size * 2)) $((size * 2)) Packaging/AppIcon.png --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
 SIGN_ARGS=(--force --sign "$SIGN_IDENTITY" --options runtime)
 [[ "$SIGN_IDENTITY" != "-" ]] && SIGN_ARGS+=(--timestamp)  # timestamps need a real identity
