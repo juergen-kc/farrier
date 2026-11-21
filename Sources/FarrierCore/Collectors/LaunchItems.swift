@@ -59,6 +59,7 @@ public struct LaunchItemsCollector: Sendable {
         }
         var items: [FactValue] = []
         var cache: [String: CodeSignatureInfo?] = [:]
+        var ignored = 0
         for location in present {
             // An unlistable folder would make the inventory incomplete, so the whole fact is unknown.
             guard let names = listDirectory(location.path) else {
@@ -66,15 +67,18 @@ public struct LaunchItemsCollector: Sendable {
             }
             for name in names.sorted() where name.hasSuffix(".plist") && !name.hasPrefix(".") {
                 let path = location.path + "/" + name
-                items.append(item(plist: path, scope: location.scope, cache: &cache))
+                if let item = item(plist: path, scope: location.scope, cache: &cache) { items.append(item) } else { ignored += 1 }
             }
         }
         let unchecked = items.filter { $0.object?["signature"]?.object?["notarized"] == nil }.count
         let detail = "\(items.count) item(s)" + (unchecked > 0 ? ", \(unchecked) not fully checked" : "")
+            + (ignored > 0 ? ", \(ignored) plist(s) without a program ignored (launchd can't run them)" : "")
         return (.array(items), CollectionNote(fact: Self.fact, status: .collected, source: source, detail: detail))
     }
 
-    func item(plist path: String, scope: String, cache: inout [String: CodeSignatureInfo?]) -> FactValue {
+    /// One job, or nil for a plist launchd can't run (no Program, ProgramArguments or BundleProgram: for example
+    /// the empty placeholders an updater leaves behind). Those aren't jobs, so they don't affect the rule.
+    func item(plist path: String, scope: String, cache: inout [String: CodeSignatureInfo?]) -> FactValue? {
         var o: [String: FactValue] = ["plist": .string(path), "scope": .string(scope)]
         guard let data = readFile(path) else {
             o["error"] = .string("cannot read the plist")
@@ -84,6 +88,8 @@ public struct LaunchItemsCollector: Sendable {
             o["error"] = .string("cannot parse the plist")
             return .object(o)
         }
+        let runnable = plist["Program"] != nil || plist["ProgramArguments"] != nil || plist["BundleProgram"] != nil
+        guard runnable else { return nil }
         if let label = plist["Label"]?.string { o["label"] = .string(label) }
         if case .bool(let b)? = plist["Disabled"] { o["disabled"] = .bool(b) }
         if case .bool(let b)? = plist["RunAtLoad"] { o["runAtLoad"] = .bool(b) }

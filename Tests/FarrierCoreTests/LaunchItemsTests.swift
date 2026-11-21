@@ -69,12 +69,15 @@ struct LaunchItemsTests {
             a + "/com.example.unsigned.plist": plist(["Label": "com.example.unsigned", "ProgramArguments": ["/usr/local/bin/tool"],
                                                        "Disabled": true]),
             u + "/com.example.docs.plist": plist(["Label": "com.example.docs", "Program": home + "/Documents/thing"]),
+            // Not jobs: an empty placeholder (as GoogleUpdater leaves for Keystone) and a label without a program.
+            u + "/com.google.keystone.agent.plist": plist([:]),
+            u + "/labelonly.plist": plist(["Label": "labelonly"]),
         ]
         let dirs: [String: [String]] = [
             d: ["com.example.daemon.plist", "com.example.script.plist", "com.example.inline.plist", "com.example.gone.plist",
                 "com.example.bundle.plist", "broken.plist", "unreadable.plist", ".hidden.plist", "README.txt"],
             a: ["com.example.unsigned.plist"],
-            u: ["com.example.docs.plist"],
+            u: ["com.example.docs.plist", "com.google.keystone.agent.plist", "labelonly.plist"],
         ]
         let sigs = FakeSignatures(["/opt/example/daemon": signed, "/bin/sh": apple, "/bin/zsh": apple, "/usr/local/bin/tool": unsigned])
         let (value, note) = collector(files: files, dirs: dirs,
@@ -115,6 +118,9 @@ struct LaunchItemsTests {
         // Each program is checked once, however many jobs use it.
         #expect(sigs.checks.values.allSatisfy { $0 == 1 })
         #expect(note.detail?.contains("not fully checked") == true)
+        #expect(note.detail?.contains("2 plist(s) without a program ignored") == true)
+        #expect(all[u + "/labelonly.plist"] == nil)
+        #expect(daemon["signature"]?.object?["source"] == .string("Notarized Developer ID"))
     }
 
     @Test func aScriptRunDirectlyIsFlaggedAsAScript() throws {
@@ -128,6 +134,14 @@ struct LaunchItemsTests {
         #expect(x["signature"]?.object?["valid"] == .bool(false))
         #expect(x["signature"]?.object?["error"]?.string?.contains("a script") == true)
         #expect(sigs.checks.isEmpty)
+    }
+
+    @Test func sourceUsesGatekeepersWords() {
+        #expect(CodeSignatureInfo(valid: true, notarized: false, teamID: "4C6364ACXT").source == "Unnotarized Developer ID")
+        #expect(signed.source == "Notarized Developer ID")
+        #expect(apple.source == "Apple")
+        #expect(unsigned.source == "Unsigned")
+        #expect(CodeSignatureInfo(valid: true, notarized: false, adhoc: true).source == "Ad hoc")
     }
 
     @Test func anUnlistableFolderMakesTheFactUnknown() {

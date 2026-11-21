@@ -30,7 +30,12 @@ Rules of the road:
 About `launchd.items`:
 - `signature.notarized` is true for notarized code **and for Apple's own code** (which isn't notarized but is trusted
   the same way). It's missing when it couldn't be determined, which makes the rule *unknown*, never a pass.
+- `signature.source` says it in Gatekeeper's words: `Apple`, `Notarized Developer ID`, `Unnotarized Developer ID`,
+  `Ad hoc`, `Unsigned`, … (checked against `spctl --assess` on a macOS 27.2.1 VM: Parallels Guest Tools'
+  `prltoolsd` is an unnotarized Developer ID binary, GoogleUpdater a notarized one).
 - A job whose program no longer exists is reported with `valid: false`: a leftover that should be reviewed.
+- Plists launchd can't run (no `Program`, `ProgramArguments` or `BundleProgram`, such as the empty placeholders
+  GoogleUpdater leaves for Keystone) aren't jobs: they're left out and counted in the collection note.
 - When the program is an interpreter (`sh`, `python3`, `osascript`, …), the script it runs is in `script` (or
   `inlineCommand: true`). The signature is the interpreter's; scripts can't be signed. A rule for scripted jobs is
   planned. A script that launchd runs directly (through its `#!` line) is reported in `script` with `valid: false`

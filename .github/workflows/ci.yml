@@ -75,7 +75,7 @@ jobs:
           items = json.load(open("launch-facts.json"))["facts"].get("launchd.items", [])
           for i in items:
               s = i.get("signature", {})
-              print(f'{i.get("scope", "?"):14} {i.get("label", "?"):55} valid={s.get("valid")} notarized={s.get("notarized")} apple={s.get("appleSigned")} team={s.get("teamID")} {i.get("error", "")}')
+              print(f'{i.get("scope", "?"):14} {i.get("label", "?"):50} {s.get("source", "-"):26} team={s.get("teamID")} script={i.get("script")} {s.get("error") or i.get("error") or ""}')
           PY
       - name: Live posture on the runner
         run: swift run farrier posture

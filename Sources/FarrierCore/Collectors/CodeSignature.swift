@@ -34,7 +34,21 @@ public struct CodeSignatureInfo: Sendable, Equatable {
         if let teamID { o["teamID"] = .string(teamID) }
         if let identifier { o["identifier"] = .string(identifier) }
         if let error { o["error"] = .string(error) }
+        o["source"] = .string(source)
         return .object(o)
+    }
+
+    /// In Gatekeeper's words where it has them ("Notarized Developer ID", "Unnotarized Developer ID").
+    public var source: String {
+        if !valid { return error == "unsigned" ? "Unsigned" : "Invalid signature" }
+        if appleSigned { return "Apple" }
+        if adhoc { return "Ad hoc" }
+        if teamID == nil { return "Unknown signer" }
+        switch notarized {
+        case true?: return "Notarized Developer ID"
+        case false?: return "Unnotarized Developer ID"
+        case nil: return "Developer ID (notarization unknown)"
+        }
     }
 }
 
