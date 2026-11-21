@@ -109,6 +109,10 @@ F=/Applications/Farrier.app/Contents/MacOS/farrier; $F apply <plan-id>
 
 Settings an MDM profile manages are never planned. `farrier journal verify` checks the record of what was changed.
 
+A known, acceptable finding (say, a VM's guest tools that are signed but not notarized) can be accepted per vendor,
+with the same approval: `farrier exceptions add --team 4C6364ACXT --reason "Parallels Guest Tools in this VM"`, then
+`farrier apply <plan-id>`.
+
 **With Claude Code** (or any MCP client): `farrier mcp` serves the same over MCP. Register it once, for every folder:
 
 ```bash

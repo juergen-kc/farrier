@@ -97,8 +97,13 @@ func printPlan(_ plan: Plan) {
     let left = max(0, Int(expires.timeIntervalSinceNow / 60))
     print("plan \(plan.id)  (\(plan.tier.rawValue), hash \(plan.shortHash()), expires in \(left) min)")
     for item in plan.items {
-        print("  [\(item.tier.rawValue)] \(item.summary)")
-        print("        rule \(item.ruleID): \(item.fact) is \(item.observed)  → action \(item.action)")
+        print("  [\(item.tier.rawValue)] \(item.description)")
+        if item.parameters == nil {
+            print("        rule \(item.ruleID): \(item.fact) is \(item.observed)  → action \(item.action)")
+        } else {
+            let label = item.action == RemediationCatalog.exceptionRemove.id ? "reason it was accepted" : "covers"
+            print("        \(label): \(item.observed)  → action \(item.action)")
+        }
     }
     if plan.tier.needsApproval { print("applying it asks for Touch ID or your password on this Mac") }
 }
@@ -213,4 +218,79 @@ struct JournalShow: ParsableCommand {
             print(line)
         }
     }
+}
+
+// MARK: - farrier exceptions
+
+struct ExceptionsCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "exceptions",
+        abstract: "Accept a vendor's signed items for a rule (for example unnotarized but Developer ID–signed launch items).",
+        discussion: """
+        Exceptions are stored by the privileged helper in a root-owned file. Adding or removing one makes a plan; \
+        `farrier apply` then asks for Touch ID or your password, like any change to system settings.
+        """,
+        subcommands: [ExceptionsList.self, ExceptionsAdd.self, ExceptionsRemove.self]
+    )
+}
+
+struct ExceptionsList: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "list", abstract: "List the approved exceptions.")
+
+    @Flag(help: "Output JSON.")
+    var json = false
+
+    func run() throws {
+        let out = Operations.exceptions(FarrierContext.live(actor: "cli"))
+        if json { return try Output.json(out) }
+        if let problem = out.problem { note(problem) }
+        if out.exceptions.isEmpty { print("no exceptions") }
+        let formatter = ISO8601DateFormatter()
+        for e in out.exceptions {
+            let when = formatter.string(from: Date(timeIntervalSince1970: TimeInterval(e.acceptedAt)))
+            print("\(e.ruleID)  team \(e.teamID)\(e.identifier.map { " (\($0))" } ?? "")  — \(e.reason)  [\(when), plan \(e.planID.prefix(8))]")
+        }
+    }
+}
+
+struct ExceptionsAdd: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "add", abstract: "Plan an exception for a vendor's signed items.")
+
+    @Option(help: "The posture rule.") var rule = "posture.core.unsigned-launch-items"
+    @Option(help: "The vendor's Apple Team ID (TeamIdentifier, as in `farrier facts`).") var team: String
+    @Option(help: "Only this signing identifier of the team.") var identifier: String?
+    @Option(help: "Why it's acceptable (shown in the approval prompt and kept with the exception).") var reason: String
+
+    func run() throws {
+        try planAndPrint { ctx in
+            try Operations.planException(ctx, ruleID: rule, teamID: team, identifier: identifier, reason: reason, remove: false)
+        }
+    }
+}
+
+struct ExceptionsRemove: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "remove", abstract: "Plan removing an exception.")
+
+    @Option(help: "The posture rule.") var rule = "posture.core.unsigned-launch-items"
+    @Option(help: "The vendor's Apple Team ID.") var team: String
+    @Option(help: "The signing identifier, if the exception has one.") var identifier: String?
+
+    func run() throws {
+        try planAndPrint { ctx in
+            try Operations.planException(ctx, ruleID: rule, teamID: team, identifier: identifier, reason: nil, remove: true)
+        }
+    }
+}
+
+func planAndPrint(_ make: (FarrierContext) throws -> PlanOutput) throws {
+    let out: PlanOutput
+    do {
+        out = try make(FarrierContext.live(actor: "cli"))
+    } catch let error as OperationError {
+        note("\(error)")
+        throw ExitCode(2)
+    }
+    guard let plan = out.plan else { return print(out.next) }
+    printPlan(plan)
+    print("\nreview it, then run: farrier apply \(plan.id.prefix(8))")
 }

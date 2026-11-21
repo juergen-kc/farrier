@@ -17,7 +17,7 @@ requests() {
 cat "$OUT"
 fail() { echo "::error::mcp smoke: $1"; exit 1; }
 grep -q '"protocolVersion":"2025-11-25"' "$OUT" || fail "no initialize reply with protocol 2025-11-25"
-for tool in farrier_status facts_collect posture_check posture_explain posture_plan_remediation plan_show apply_plan journal_recent; do
+for tool in farrier_status facts_collect posture_check posture_explain posture_plan_remediation plan_show apply_plan journal_recent exceptions_list posture_plan_exception; do
   grep -q "\"name\":\"$tool\"" "$OUT" || fail "tools/list lacks $tool"
 done
 grep -q '"fixAction":"firewall.enable"' "$OUT" || fail "posture_explain did not return the firewall rule"

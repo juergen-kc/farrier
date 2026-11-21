@@ -265,6 +265,14 @@ The same keychain also refuses SSH sessions (finding F4).
    Verifying and applying are one verb on purpose: with a separate `submitApproval`, a verified approval would have
    to be remembered and later matched to a plan, which is one more place for the two to come apart.
 
+**Exceptions (accepted risks).** Some findings are known and acceptable, for example a VM's guest tools that are
+Developer ID–signed but not notarized. An exception names a rule, a vendor's Apple Team ID (optionally one signing
+identifier) and a reason. It only removes **validly signed** items of that team from the rule's list fact; it never
+turns an unknown into a pass. Adding or removing one is a T4 plan (`exception.add`, `exception.remove`) approved on
+the Mac like any other: the prompt shows the team and the reason, which come from validated parameters. The helper
+writes `/Library/Application Support/Farrier/exceptions.json` (root:wheel, 0644); a copy that isn't root-owned or is
+writable by others is ignored, so malware running as the user can't accept itself. Each change is journaled.
+
 **Carrying out an item.** Each catalog action is fixed code in the helper that re-checks the Mac first. For
 `firewall.enable`: the helper reads the MDM profiles itself and refuses if one manages the firewall, or if it can't
 tell; it reads the current state and reports `alreadyCompliant`, or refuses if the state differs from what the plan

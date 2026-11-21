@@ -47,6 +47,8 @@ public struct FarrierContext {
     public var applyThroughHelper: (Plan) throws -> ApplyReply
     /// Who is asking, for the journal: `cli` or `mcp:<client name>`.
     public var actor: String
+    /// Approved posture exceptions (the root-owned file the helper writes).
+    public var exceptions: () -> (exceptions: [PostureException], problem: String?) = { ExceptionStore().load() }
 
     public init(collectFacts: @escaping () -> CollectionResult, rulePaths: [String], plans: PlanStore, journal: Journal,
                 host: @escaping () -> String, applyThroughHelper: @escaping (Plan) throws -> ApplyReply, actor: String) {
@@ -95,6 +97,15 @@ public struct PostureOutput: Codable {
     public let summary: [String: Int]
     /// How each fact was obtained, or why it's missing (only for the facts the evaluated rules use).
     public let collection: [CollectionNote]
+    /// The approved exceptions in effect, and why none could be read if so.
+    public let exceptions: [PostureException]
+    public let exceptionsProblem: String?
+}
+
+public struct ExceptionsOutput: Codable {
+    public let exceptions: [PostureException]
+    public let problem: String?
+    public let path: String
 }
 
 public struct RuleExplanation: Codable {
@@ -165,7 +176,8 @@ public enum Operations {
     public static func posture(_ ctx: FarrierContext, ruleIDs: Set<String>? = nil) throws -> PostureOutput {
         let packs = try packs(ctx)
         let collected = ctx.collectFacts()
-        let report = PostureEngine.evaluate(packs, facts: StaticFactStore(collected))
+        let (exceptions, exceptionsProblem) = ctx.exceptions()
+        let report = PostureEngine.evaluate(packs, facts: StaticFactStore(collected), exceptions: exceptions)
         var used: Set<String> = [CoreFacts.profilePayloadTypes, CoreFacts.declarationTypes]
         for pack in packs { for case .check(let rule) in pack.rules { used.insert(rule.fact) } }
         let findings = ruleIDs.map { ids in report.findings.filter { ids.contains($0.ruleID) } } ?? report.findings
@@ -174,7 +186,8 @@ public enum Operations {
             guard unknown.isEmpty else { throw OperationError("no such posture rule: \(unknown.sorted().joined(separator: ", "))") }
         }
         return PostureOutput(findings: findings, summary: PostureReport(findings: findings).summary,
-                             collection: collected.notes.filter { used.contains($0.fact) }.sorted { $0.fact < $1.fact })
+                             collection: collected.notes.filter { used.contains($0.fact) }.sorted { $0.fact < $1.fact },
+                             exceptions: exceptions, exceptionsProblem: exceptionsProblem)
     }
 
     public static func explain(_ ctx: FarrierContext, ruleID: String) throws -> RuleExplanation {
@@ -196,7 +209,7 @@ public enum Operations {
     public static func planPosture(_ ctx: FarrierContext, ruleIDs: Set<String>? = nil, now: Date = Date()) throws -> PlanOutput {
         let packs = try packs(ctx)
         let store = StaticFactStore(ctx.collectFacts())
-        let report = PostureEngine.evaluate(packs, facts: store)
+        let report = PostureEngine.evaluate(packs, facts: store, exceptions: ctx.exceptions().exceptions)
         let (plan, skipped) = Planner.plan(report: report, packs: packs, facts: store, ruleIDs: ruleIDs,
                                            host: ctx.host(), now: now)
         guard let plan else {
@@ -210,6 +223,39 @@ public enum Operations {
             ? "review the plan with the user; applying it asks them for Touch ID or their password on this Mac"
             : "review the plan with the user, then apply it"
         return PlanOutput(plan: plan, planHash: hash, skipped: skipped, path: url.path, next: next)
+    }
+
+    public static func exceptions(_ ctx: FarrierContext) -> ExceptionsOutput {
+        let (list, problem) = ctx.exceptions()
+        return ExceptionsOutput(exceptions: list, problem: problem, path: ExceptionStore.defaultPath)
+    }
+
+    /// Plans an exception (add, or remove when `reason` is nil and `remove` is set). Nothing changes until it's
+    /// applied, which asks the user on the Mac.
+    public static func planException(_ ctx: FarrierContext, ruleID: String, teamID: String, identifier: String?,
+                                     reason: String?, remove: Bool, now: Date = Date()) throws -> PlanOutput {
+        let existing = ctx.exceptions().exceptions
+        let plan: Plan
+        do {
+            if remove {
+                plan = try Planner.planExceptionRemoval(ruleID: ruleID, teamID: teamID, identifier: identifier,
+                                                        existing: existing, host: ctx.host(), now: now)
+            } else {
+                guard let reason else { throw OperationError("an exception needs a reason") }
+                plan = try Planner.planException(ruleID: ruleID, teamID: teamID, identifier: identifier, reason: reason,
+                                                 facts: StaticFactStore(ctx.collectFacts()), existing: existing,
+                                                 host: ctx.host(), now: now)
+            }
+        } catch let error as PlanError {
+            throw OperationError(error.description)
+        }
+        let url = try ctx.plans.save(plan)
+        let hash = try plan.hash().hexString
+        try? ctx.journal.append(JournalRecord(time: plan.createdAt, actor: ctx.actor, planID: plan.id, planHash: hash,
+                                              ruleID: ruleID, action: plan.items.first?.action, outcome: "planned",
+                                              detail: plan.items.first?.description))
+        return PlanOutput(plan: plan, planHash: hash, skipped: [], path: url.path,
+                          next: "review it with the user; applying it asks them for Touch ID or their password on this Mac")
     }
 
     public static func show(_ ctx: FarrierContext, id: String, now: Date = Date()) throws -> PlanView {

@@ -228,7 +228,7 @@ extension HelperService {
         var results: [ItemResult] = []
         for item in approved.items {
             lifecycle.touch()
-            let r = Remediator.apply(item)
+            let r = Remediator.apply(item, planID: approved.id)
             helperLog("plan \(approved.id) \(item.action): \(r.outcome.rawValue) \(r.detail ?? "")")
             results.append(r)
             if let error = Self.record(approved.id, hashHex, r.outcome.rawValue, ruleID: item.ruleID, action: item.action, detail: r.detail) {

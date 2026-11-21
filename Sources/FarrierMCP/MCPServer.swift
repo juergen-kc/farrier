@@ -116,6 +116,24 @@ public enum ToolCatalog {
              inputSchema: schema(["planID": planID], required: ["planID"]),
              annotations: .init(title: "Apply a plan", readOnlyHint: false, destructiveHint: true,
                                 idempotentHint: false, openWorldHint: false)),
+        Tool(name: "exceptions_list", title: "List posture exceptions",
+             description: "The approved posture exceptions: vendors (Apple Team IDs) whose signed items the user accepted for "
+                 + "a rule, with the reason and when.",
+             inputSchema: schema(), annotations: readOnly("List posture exceptions")),
+        Tool(name: "posture_plan_exception", title: "Plan a posture exception",
+             description: "Plan accepting (or, with remove: true, no longer accepting) a vendor's validly signed items for a rule, "
+                 + "for example launch items that are Developer ID–signed but not notarized. Only when the user asks for it: "
+                 + "it makes Farrier stop reporting those items. Nothing changes until apply_plan, which asks the user on the Mac. "
+                 + "The team ID is the signature's teamID from facts_collect or posture_check.",
+             inputSchema: schema([
+                 "ruleID": ["type": "string", "description": "Default: posture.core.unsigned-launch-items"],
+                 "teamID": ["type": "string", "description": "Apple Team ID, 10 uppercase letters or digits"],
+                 "identifier": ["type": "string", "description": "Only this signing identifier of the team"],
+                 "reason": ["type": "string", "description": "Why it's acceptable, in the user's words (required to add)"],
+                 "remove": ["type": "boolean"],
+             ], required: ["teamID"]),
+             annotations: .init(title: "Plan a posture exception", readOnlyHint: false, destructiveHint: false,
+                                idempotentHint: false, openWorldHint: false)),
         Tool(name: "journal_recent", title: "Recent journal entries",
              description: "The latest entries of Farrier's journal of planned and applied changes, and whether its hash "
                  + "chain is intact. `helper: true` reads the privileged helper's journal instead of the user's.",
@@ -145,9 +163,16 @@ public enum ToolCatalog {
                 let out = try Operations.apply(ctx, id: try string(args["planID"], "planID"))
                 let failed = out.error != nil || out.results.contains { $0.outcome == .failed || $0.outcome == .refused }
                 return try result(out, isError: failed)
+            case "exceptions_list":
+                return try result(Operations.exceptions(ctx))
+            case "posture_plan_exception":
+                return try result(Operations.planException(
+                    ctx, ruleID: try optionalString(args, "ruleID") ?? "posture.core.unsigned-launch-items",
+                    teamID: try string(args["teamID"], "teamID"), identifier: try optionalString(args, "identifier"),
+                    reason: try optionalString(args, "reason"), remove: try optionalBool(args, "remove") ?? false))
             case "journal_recent":
-                let last = args["last"]?.intValue ?? 20
-                let helper = args["helper"]?.boolValue ?? false
+                let last = try optionalInt(args, "last") ?? 20
+                let helper = try optionalBool(args, "helper") ?? false
                 return try result(Operations.journal(helper ? helperJournal : ctx.journal, name: helper ? "helper" : "user", last: last))
             default:
                 return message("unknown tool \(name)")
@@ -160,6 +185,26 @@ public enum ToolCatalog {
     static func string(_ v: Value?, _ name: String) throws -> String {
         guard let s = v?.stringValue, !s.isEmpty else { throw OperationError("`\(name)` is required") }
         return s
+    }
+
+    // Optional arguments: absent (or null) means the default; present with the wrong type is an error, never
+    // silently "absent" (a numeric identifier must not widen an exception, a "true" string must not flip remove).
+    static func optionalString(_ args: [String: Value], _ key: String) throws -> String? {
+        guard let v = args[key], !v.isNull else { return nil }
+        guard let s = v.stringValue else { throw OperationError("`\(key)` must be a string") }
+        return s
+    }
+
+    static func optionalBool(_ args: [String: Value], _ key: String) throws -> Bool? {
+        guard let v = args[key], !v.isNull else { return nil }
+        guard let b = v.boolValue else { throw OperationError("`\(key)` must be true or false") }
+        return b
+    }
+
+    static func optionalInt(_ args: [String: Value], _ key: String) throws -> Int? {
+        guard let v = args[key], !v.isNull else { return nil }
+        guard let i = v.intValue else { throw OperationError("`\(key)` must be an integer") }
+        return i
     }
 
     static func stringSet(_ v: Value?) throws -> Set<String>? {

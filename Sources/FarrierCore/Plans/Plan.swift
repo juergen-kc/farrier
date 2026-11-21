@@ -20,14 +20,35 @@ public struct PlanItem: Codable, Sendable, Equatable {
     /// The fact the rule checks, and its value at planning time.
     public let fact: String
     public let observed: FactValue
+    /// Only for actions that take them (exceptions: team ID, identifier, reason). Validated by the catalog when the
+    /// plan is decoded and again by the helper; absent from the JSON otherwise, so older plans hash the same.
+    public let parameters: [String: String]?
 
-    public init(ruleID: String, action: String, tier: Tier, summary: String, fact: String, observed: FactValue) {
+    public init(ruleID: String, action: String, tier: Tier, summary: String, fact: String, observed: FactValue,
+                parameters: [String: String]? = nil) {
         self.ruleID = ruleID
         self.action = action
         self.tier = tier
         self.summary = summary
         self.fact = fact
         self.observed = observed
+        self.parameters = parameters
+    }
+
+    /// What the item does, from the catalog and the validated parameters: the text for the listing and the prompt.
+    public var description: String {
+        guard let action = RemediationCatalog.action(self.action) else { return "unknown change \(self.action)" }
+        guard action.takesParameters, let p = try? ExceptionRules.validate(ruleID: ruleID, parameters,
+                                                                            requireReason: action.id == RemediationCatalog.exceptionAdd.id) else {
+            return action.summary
+        }
+        let scope = "team \(p.teamID)" + (p.identifier.map { ", identifier \($0)" } ?? "")
+        switch action.id {
+        case RemediationCatalog.exceptionAdd.id:
+            return "\(action.summary): accept items signed by \(scope) for \(ruleID) (\"\(p.reason)\")"
+        default:
+            return "\(action.summary): \(scope) for \(ruleID)"
+        }
     }
 }
 
@@ -86,6 +107,12 @@ public struct Plan: Codable, Sendable, Equatable {
             guard item.summary == action.summary, item.fact == action.fact else {
                 throw PlanError("`\(item.action)`'s description in the plan does not match Farrier's")
             }
+            if action.takesParameters {
+                _ = try ExceptionRules.validate(ruleID: item.ruleID, item.parameters,
+                                                requireReason: action.id == RemediationCatalog.exceptionAdd.id)
+            } else if item.parameters != nil {
+                throw PlanError("`\(item.action)` takes no parameters")
+            }
         }
         return plan
     }
@@ -112,6 +139,8 @@ public struct RemediationAction: Sendable, Equatable {
     /// Payload types whose presence means MDM owns the setting: the helper then refuses to touch it.
     public let managedPayloadTypes: [String]
     public let summary: String
+    /// Exceptions carry their scope as parameters; everything else is fully described by the action.
+    public var takesParameters: Bool { id.hasPrefix("exception.") }
 }
 
 public enum RemediationCatalog {
@@ -121,7 +150,17 @@ public enum RemediationCatalog {
         summary: "Turn on the application firewall"
     )
 
-    public static let all: [RemediationAction] = [firewallEnable]
+    /// Accepting or withdrawing an exception changes what posture reports, so it's approved like a system setting.
+    public static let exceptionAdd = RemediationAction(
+        id: "exception.add", tier: .t4, fact: "launchd.items", compliantValues: [], managedPayloadTypes: [],
+        summary: "Add a posture exception"
+    )
+    public static let exceptionRemove = RemediationAction(
+        id: "exception.remove", tier: .t4, fact: "launchd.items", compliantValues: [], managedPayloadTypes: [],
+        summary: "Remove a posture exception"
+    )
+
+    public static let all: [RemediationAction] = [firewallEnable, exceptionAdd, exceptionRemove]
 
     public static func action(_ id: String) -> RemediationAction? { all.first { $0.id == id } }
 }
@@ -204,5 +243,52 @@ public enum Planner {
         guard !items.isEmpty else { return (nil, skipped) }
         let created = Int64(now.timeIntervalSince1970)
         return (Plan(id: id, createdAt: created, expiresAt: created + ttl, host: host, items: items), skipped)
+    }
+}
+
+// MARK: - Exception plans
+
+extension Planner {
+    /// Plans adding an exception. It must cover at least one current item that is validly signed by the team, and
+    /// not exist already. `observed` records which items it covers, so the reviewer sees what they accept.
+    public static func planException(ruleID: String, teamID: String, identifier: String?, reason: String,
+                                     facts: FactStore, existing: [PostureException], host: String, now: Date = Date(),
+                                     ttl: Int64 = Plan.defaultTTL, id: String = UUID().uuidString.lowercased()) throws -> Plan {
+        let parameters = ExceptionRules.parameters(teamID: teamID, identifier: identifier, reason: reason)
+        let p = try ExceptionRules.validate(ruleID: ruleID, parameters)
+        let candidate = PostureException(ruleID: ruleID, teamID: p.teamID, identifier: p.identifier, reason: p.reason,
+                                         acceptedAt: 0, planID: id)
+        guard !existing.contains(where: { $0.sameScope(as: candidate) }) else {
+            throw PlanError("that exception already exists")
+        }
+        let action = RemediationCatalog.exceptionAdd
+        let items = facts.value(for: action.fact)?.array ?? []
+        let covered = items.filter(candidate.matches)
+        guard !covered.isEmpty else {
+            throw PlanError("no current \(action.fact) item has a valid signature by team \(p.teamID)"
+                            + (p.identifier.map { " with identifier \($0)" } ?? ""))
+        }
+        let labels = covered.map { FactValue.string($0.object?["label"]?.string ?? $0.object?["plist"]?.string ?? "item") }
+        let item = PlanItem(ruleID: ruleID, action: action.id, tier: action.tier, summary: action.summary, fact: action.fact,
+                            observed: .array(labels), parameters: parameters)
+        let created = Int64(now.timeIntervalSince1970)
+        return Plan(id: id, createdAt: created, expiresAt: created + ttl, host: host, items: [item])
+    }
+
+    /// Plans removing an existing exception.
+    public static func planExceptionRemoval(ruleID: String, teamID: String, identifier: String?, existing: [PostureException],
+                                            host: String, now: Date = Date(), ttl: Int64 = Plan.defaultTTL,
+                                            id: String = UUID().uuidString.lowercased()) throws -> Plan {
+        var parameters = ["teamID": teamID]
+        if let identifier { parameters["identifier"] = identifier }
+        let p = try ExceptionRules.validate(ruleID: ruleID, parameters, requireReason: false)
+        guard let match = existing.first(where: { $0.ruleID == ruleID && $0.teamID == p.teamID && $0.identifier == p.identifier }) else {
+            throw PlanError("no such exception")
+        }
+        let action = RemediationCatalog.exceptionRemove
+        let item = PlanItem(ruleID: ruleID, action: action.id, tier: action.tier, summary: action.summary, fact: action.fact,
+                            observed: .string(match.reason), parameters: parameters)
+        let created = Int64(now.timeIntervalSince1970)
+        return Plan(id: id, createdAt: created, expiresAt: created + ttl, host: host, items: [item])
     }
 }
