@@ -38,11 +38,16 @@ cask "farrier" do
     sudo:       true,
   }
 
-  zap script: {
-    executable: "#{appdir}/Farrier.app/Contents/Resources/uninstall.sh",
-    args:       ["--purge"],
-    sudo:       true,
-  }
+  # Homebrew runs `uninstall` (which removes the app) before `zap`, so zap names the remaining data directly.
+  zap trash:  [
+        "~/.farrier",
+        "~/Library/Application Support/Farrier",
+        "~/Library/Logs/Farrier",
+      ],
+      delete: [
+        "/Library/Application Support/Farrier",
+        "/Library/Logs/farrier-helper.log",
+      ]
 
   caveats <<~EOS
     Then, as yourself:
