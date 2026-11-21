@@ -69,9 +69,10 @@ jobs:
         run: swift run farrier facts
       - name: Launch items on the runner
         run: |
+          swift run farrier facts --json > launch-facts.json
           python3 - <<'PY'
           import json
-          items = json.load(open("facts.json"))["facts"].get("launchd.items", [])
+          items = json.load(open("launch-facts.json"))["facts"].get("launchd.items", [])
           for i in items:
               s = i.get("signature", {})
               print(f'{i.get("scope", "?"):14} {i.get("label", "?"):55} valid={s.get("valid")} notarized={s.get("notarized")} apple={s.get("appleSigned")} team={s.get("teamID")} {i.get("error", "")}')
