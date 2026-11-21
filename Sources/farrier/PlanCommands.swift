@@ -101,7 +101,8 @@ func printPlan(_ plan: Plan) {
         if item.parameters == nil {
             print("        rule \(item.ruleID): \(item.fact) is \(item.observed)  → action \(item.action)")
         } else {
-            print("        covers: \(item.observed)  → action \(item.action)")
+            let label = item.action == RemediationCatalog.exceptionRemove.id ? "reason it was accepted" : "covers"
+            print("        \(label): \(item.observed)  → action \(item.action)")
         }
     }
     if plan.tier.needsApproval { print("applying it asks for Touch ID or your password on this Mac") }

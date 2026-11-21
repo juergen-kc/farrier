@@ -73,6 +73,9 @@ Done:
 - [x] Posture exceptions: accept a vendor's validly signed items for a rule (Apple Team ID, optional identifier,
       reason), as T4 plans approved on the Mac and stored by the helper in a root-owned file; `farrier exceptions
       list|add|remove`, MCP `exceptions_list` and `posture_plan_exception`; findings list what was accepted.
+      **Validated** on the macOS 27.2.1 VM: accepting Parallels Guest Tools (team 4C6364ACXT) covered both jobs,
+      the prompt showed the team and reason, the rule passed with "2 accepted by exception", and the helper wrote
+      `exceptions.json` as root:wheel 0644.
 
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
