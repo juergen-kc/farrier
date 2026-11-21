@@ -142,8 +142,8 @@ public enum PlanApplier {
     /// The prompt text, derived from the plan only: "farrier is trying to <this>".
     public static func promptReason(for plan: Plan) -> String {
         // From the catalog, never from the plan's own text (decodeCanonical also rejects plans where they differ).
-        let changes = plan.items.map { RemediationCatalog.action($0.action)?.summary ?? "unknown change \($0.action)" }
-            .joined(separator: "; ")
+        // `description` is built from the catalog and the validated parameters (decodeCanonical rejects anything else).
+        let changes = plan.items.map(\.description).joined(separator: "; ")
         let what = plan.items.count == 1 ? changes : "\(plan.items.count) changes: \(changes)"
         return "apply Farrier plan \(plan.shortHash()) (\(plan.tier.rawValue)): \(what)"
     }

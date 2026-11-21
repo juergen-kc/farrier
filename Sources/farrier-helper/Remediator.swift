@@ -8,7 +8,7 @@ import Foundation
 enum Remediator {
     static let socketfilterfw = "/usr/libexec/ApplicationFirewall/socketfilterfw"
 
-    static func apply(_ item: PlanItem, runner: CommandRunning = ProcessRunner()) -> ItemResult {
+    static func apply(_ item: PlanItem, planID: String, runner: CommandRunning = ProcessRunner()) -> ItemResult {
         func result(_ outcome: ItemResult.Outcome, _ detail: String?) -> ItemResult {
             ItemResult(ruleID: item.ruleID, action: item.action, outcome: outcome, detail: detail)
         }
@@ -29,9 +29,44 @@ enum Remediator {
         switch action.id {
         case RemediationCatalog.firewallEnable.id:
             return enableFirewall(item, action, runner, result)
+        case RemediationCatalog.exceptionAdd.id, RemediationCatalog.exceptionRemove.id:
+            return changeException(item, planID: planID, adding: action.id == RemediationCatalog.exceptionAdd.id, result)
         default:
             return result(.refused, "no implementation for \(action.id)")
         }
+    }
+
+    /// Adds or removes an exception in the root-owned exceptions file. The parameters are validated here again;
+    /// the plan's text is never trusted.
+    private static func changeException(_ item: PlanItem, planID: String, adding: Bool,
+                                        _ result: (ItemResult.Outcome, String?) -> ItemResult) -> ItemResult {
+        let p: ExceptionRules.Parameters
+        do {
+            p = try ExceptionRules.validate(ruleID: item.ruleID, item.parameters, requireReason: adding)
+        } catch {
+            return result(.refused, "\(error)")
+        }
+        let store = ExceptionStore()
+        let (current, problem) = store.load()
+        // A file that can't be trusted isn't silently replaced: someone should look at it first.
+        if let problem, FileManager.default.fileExists(atPath: store.path) { return result(.refused, problem) }
+        let wanted = PostureException(ruleID: item.ruleID, teamID: p.teamID, identifier: p.identifier, reason: p.reason,
+                                      acceptedAt: Int64(Date().timeIntervalSince1970), planID: planID)
+        var updated = current
+        if adding {
+            if current.contains(where: { $0.sameScope(as: wanted) }) { return result(.alreadyCompliant, "the exception already exists") }
+            updated.append(wanted)
+        } else {
+            updated.removeAll { $0.sameScope(as: wanted) }
+            if updated.count == current.count { return result(.alreadyCompliant, "no such exception") }
+        }
+        do {
+            try HelperService.writeRootFile(try ExceptionStore.encode(updated), to: store.path)
+        } catch {
+            return result(.failed, "could not write \(store.path): \(error)")
+        }
+        let scope = "team \(p.teamID)" + (p.identifier.map { " (\($0))" } ?? "")
+        return result(.applied, adding ? "accepted \(scope) for \(item.ruleID)" : "removed the exception for \(scope)")
     }
 
     private static func firewallState(_ runner: CommandRunning) -> String? {

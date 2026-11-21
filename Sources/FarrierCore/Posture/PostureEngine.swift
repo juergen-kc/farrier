@@ -51,6 +51,8 @@ public struct Finding: Sendable, Codable, Hashable {
     public let fixable: Bool
     public let guidance: String?
     public let mappings: [String: String]
+    /// Items left out of the evaluation because an approved exception covers them (by label, or plist path).
+    public let accepted: [String]?
 }
 
 public struct PostureReport: Sendable, Codable {
@@ -69,7 +71,9 @@ public struct PostureReport: Sendable, Codable {
 }
 
 public enum PostureEngine {
-    public static func evaluate(_ packs: [RulePack], facts: FactStore) -> PostureReport {
+    /// `exceptions`: approved exceptions (see `PostureException`). They only remove a vendor's items from list
+    /// facts of the rules they name; they never turn an unknown into a pass or touch other rules.
+    public static func evaluate(_ packs: [RulePack], facts: FactStore, exceptions: [PostureException] = []) -> PostureReport {
         // Inventories count only if they're present and valid lists of strings. Missing or malformed ≠ empty.
         func inventory(_ fact: String) -> Set<String>? {
             guard let list = facts.value(for: fact)?.array else { return nil }
@@ -83,7 +87,18 @@ public enum PostureEngine {
         for pack in packs {
             for case .check(let rule) in pack.rules {
                 let outcome: Outcome
-                if let value = facts.value(for: rule.fact) {
+                var accepted: [String]?
+                if var value = facts.value(for: rule.fact) {
+                    let applicable = exceptions.filter { $0.ruleID == rule.id }
+                    if !applicable.isEmpty, let items = value.array {
+                        let (covered, rest) = items.reduce(into: ([FactValue](), [FactValue]())) { acc, item in
+                            if applicable.contains(where: { $0.matches(item) }) { acc.0.append(item) } else { acc.1.append(item) }
+                        }
+                        if !covered.isEmpty {
+                            accepted = covered.map { $0.object?["label"]?.string ?? $0.object?["plist"]?.string ?? "item" }
+                            value = .array(rest)
+                        }
+                    }
                     outcome = rule.expect.evaluate(value)
                 } else {
                     outcome = .unknown("fact `\(rule.fact)` was not collected")
@@ -112,7 +127,8 @@ public enum PostureEngine {
                     managed: managedBy != nil, managedBy: managedBy, managementUnknown: managementUnknown,
                     fixable: status == .fail && rule.remediation.automatic && managedBy == nil && !managementUnknown,
                     guidance: status == .pass ? nil : rule.remediation.guidance,
-                    mappings: rule.mappings
+                    mappings: rule.mappings,
+                    accepted: accepted
                 ))
             }
         }

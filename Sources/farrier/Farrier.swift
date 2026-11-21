@@ -13,7 +13,7 @@ struct Farrier: AsyncParsableCommand {
         abstract: "Keep your Mac sound: hygiene, posture, drift, patching and debugging.",
         discussion: "v0.1: rule packs, fact collection, posture evaluation, the privileged helper, and plan → approve → apply for the first fix (firewall). `farrier mcp` serves the same over MCP (stdio).",
         version: version,
-        subcommands: [Posture.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Setup.self, JournalCommand.self, Helper.self, MCPCommand.self]
+        subcommands: [Posture.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self]
     )
 }
 
@@ -118,9 +118,11 @@ struct Posture: ParsableCommand {
             if f.managed { line += "  [managed by \(f.managedBy ?? "MDM")]" }
             if f.fixable { line += "  [fixable]" }
             if f.managementUnknown && f.status != .pass { line += "  [MDM profiles not checked]" }
+            if let accepted = f.accepted { line += "  [\(accepted.count) accepted by exception]" }
             print(line)
             if let reason = f.reason { print("      \(reason)") }
         }
+        if let problem = out.exceptionsProblem { note(problem) }
         let s = out.summary
         print("\(s["pass"] ?? 0) passed, \(s["fail"] ?? 0) failed, \(s["unknown"] ?? 0) unknown, \(s["managed"] ?? 0) managed by MDM")
     }
