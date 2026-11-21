@@ -18,6 +18,8 @@ public struct LaunchItemsCollector: Sendable {
     /// File names in a directory; nil if it can't be listed.
     public let listDirectory: @Sendable (String) -> [String]?
     public let signatures: CodeSignatureChecking
+    /// The first bytes of a file (to recognise a script by its `#!`), without reading all of a large binary.
+    public let readHead: @Sendable (String) -> Data?
     public let home: String
 
     public init(home: String = FileManager.default.homeDirectoryForCurrentUser.path,
@@ -25,8 +27,14 @@ public struct LaunchItemsCollector: Sendable {
                 fileExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
                 readFile: @escaping @Sendable (String) -> Data? = { FileManager.default.contents(atPath: $0) },
                 listDirectory: @escaping @Sendable (String) -> [String]? = { try? FileManager.default.contentsOfDirectory(atPath: $0) },
-                signatures: CodeSignatureChecking = SecurityFrameworkSignatures()) {
+                signatures: CodeSignatureChecking = SecurityFrameworkSignatures(),
+                readHead: (@Sendable (String) -> Data?)? = nil) {
         self.home = home
+        self.readHead = readHead ?? { path in
+            guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+            defer { try? handle.close() }
+            return try? handle.read(upToCount: 2)
+        }
         self.locations = locations ?? [
             Location(path: "/Library/LaunchDaemons", scope: "system-daemon"),
             Location(path: "/Library/LaunchAgents", scope: "system-agent"),
@@ -109,6 +117,13 @@ public struct LaunchItemsCollector: Sendable {
         if isPrivacyProtected(program) {
             // Reading it could trigger a privacy prompt for the terminal; the signature stays unknown.
             o["error"] = .string("the program is in a privacy-protected folder; its signature wasn't checked")
+            return .object(o)
+        }
+        if readHead(program) == Data("#!".utf8) {
+            // launchd runs the script itself (through its #! line). Scripts can't be signed, so it's flagged for review.
+            o["script"] = .string(program)
+            o["signature"] = CodeSignatureInfo(valid: false, notarized: false,
+                                               error: "a script (scripts can't be signed); review what it does").factValue
             return .object(o)
         }
         if cache[program] == nil { cache[program] = .some(signatures.check(path: program)) }

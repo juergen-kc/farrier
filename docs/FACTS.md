@@ -33,7 +33,8 @@ About `launchd.items`:
 - A job whose program no longer exists is reported with `valid: false`: a leftover that should be reviewed.
 - When the program is an interpreter (`sh`, `python3`, `osascript`, …), the script it runs is in `script` (or
   `inlineCommand: true`). The signature is the interpreter's; scripts can't be signed. A rule for scripted jobs is
-  planned.
+  planned. A script that launchd runs directly (through its `#!` line) is reported in `script` with `valid: false`
+  and the reason, so it gets reviewed.
 - Not checked yet, so their items carry an `error` and make the rule unknown: programs inside an app
   (`BundleProgram`), programs in privacy-protected folders (Desktop, Documents, Downloads, …; reading them could
   prompt), and plists that can't be read. Apps' embedded jobs registered with SMAppService live in the Background

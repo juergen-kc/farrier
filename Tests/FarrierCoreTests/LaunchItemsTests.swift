@@ -26,13 +26,14 @@ private let apple = CodeSignatureInfo(valid: true, notarized: true, appleSigned:
 private let unsigned = CodeSignatureInfo(valid: false, notarized: false, error: "unsigned")
 
 private func collector(files: [String: Data], dirs: [String: [String]], programs: Set<String>,
-                       signatures: FakeSignatures) -> LaunchItemsCollector {
+                       signatures: FakeSignatures, scripts: Set<String> = []) -> LaunchItemsCollector {
     LaunchItemsCollector(
         home: home,
-        fileExists: { dirs[$0] != nil || files[$0] != nil || programs.contains($0) },
+        fileExists: { dirs[$0] != nil || files[$0] != nil || programs.contains($0) || scripts.contains($0) },
         readFile: { files[$0] },
         listDirectory: { dirs[$0] },
-        signatures: signatures)
+        signatures: signatures,
+        readHead: { scripts.contains($0) ? Data("#!".utf8) : Data([0xCF, 0xFA]) })
 }
 
 private func items(_ value: FactValue?) throws -> [String: [String: FactValue]] {
@@ -114,6 +115,19 @@ struct LaunchItemsTests {
         // Each program is checked once, however many jobs use it.
         #expect(sigs.checks.values.allSatisfy { $0 == 1 })
         #expect(note.detail?.contains("not fully checked") == true)
+    }
+
+    @Test func aScriptRunDirectlyIsFlaggedAsAScript() throws {
+        let d = "/Library/LaunchDaemons"
+        let sigs = FakeSignatures([:])
+        let (value, _) = collector(files: [d + "/x.plist": plist(["Label": "x", "Program": "/usr/local/libexec/x.sh"])],
+                                   dirs: [d: ["x.plist"]], programs: [], signatures: sigs,
+                                   scripts: ["/usr/local/libexec/x.sh"]).collect()
+        let x = try #require(try items(value)[d + "/x.plist"])
+        #expect(x["script"] == .string("/usr/local/libexec/x.sh"))
+        #expect(x["signature"]?.object?["valid"] == .bool(false))
+        #expect(x["signature"]?.object?["error"]?.string?.contains("a script") == true)
+        #expect(sigs.checks.isEmpty)
     }
 
     @Test func anUnlistableFolderMakesTheFactUnknown() {
