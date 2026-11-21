@@ -67,6 +67,16 @@ jobs:
       # means a parser needs a new golden case.
       - name: Collect facts on the runner
         run: swift run farrier facts
+      - name: Launch items on the runner
+        run: |
+          swift run farrier facts --json > launch-facts.json
+          python3 - <<'PY'
+          import json
+          items = json.load(open("launch-facts.json"))["facts"].get("launchd.items", [])
+          for i in items:
+              s = i.get("signature", {})
+              print(f'{i.get("scope", "?"):14} {i.get("label", "?"):50} {s.get("source", "-"):26} team={s.get("teamID")} script={i.get("script")} {s.get("error") or i.get("error") or ""}')
+          PY
       - name: Live posture on the runner
         run: swift run farrier posture
       # Without the helper, MDM profiles can't be checked, so nothing may be planned (the firewall is left out).
@@ -83,7 +93,7 @@ jobs:
           import json, sys
           notes = {n["fact"]: n for n in json.load(open("facts.json"))["notes"]}
           required = ["os.version", "filevault.status", "sip.status", "gatekeeper.assessments",
-                      "firewall.globalState", "mdm.enrollment"]
+                      "firewall.globalState", "mdm.enrollment", "launchd.items"]
           bad = [f"{f}: {notes.get(f, {}).get('status', 'missing')} ({notes.get(f, {}).get('detail')})"
                  for f in required if notes.get(f, {}).get("status") != "collected"]
           bad += [f"{f}: unparsed ({n.get('detail')})" for f, n in notes.items() if n["status"] == "unparsed"]

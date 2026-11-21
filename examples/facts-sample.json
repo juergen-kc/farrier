@@ -10,12 +10,16 @@
   "launchd.items": [
     {
       "label": "com.example.updater",
-      "path": "/Library/LaunchDaemons/com.example.updater.plist",
+      "plist": "/Library/LaunchDaemons/com.example.updater.plist",
+      "scope": "system-daemon",
+      "program": "/Library/Application Support/Example/updater",
       "signature": { "valid": true, "notarized": true, "teamID": "ABCDE12345" }
     },
     {
       "label": "com.sketchy.agent",
-      "path": "~/Library/LaunchAgents/com.sketchy.agent.plist",
+      "plist": "/Users/tester/Library/LaunchAgents/com.sketchy.agent.plist",
+      "scope": "user-agent",
+      "program": "/Users/tester/.local/bin/agent",
       "signature": { "valid": true, "notarized": false, "teamID": null }
     }
   ],

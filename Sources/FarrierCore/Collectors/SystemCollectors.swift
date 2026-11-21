@@ -38,20 +38,23 @@ public struct CollectionResult: Sendable {
 }
 
 /// Collectors for the facts `posture.core` uses, all read-only and unprivileged (tier T0). Facts that need root
-/// or Full Disk Access (installed profile payloads, launchd items with signatures, TCC grants) come with the
-/// helper, through `readPrivileged`. The catalog is in docs/FACTS.md.
+/// or Full Disk Access (installed profile payloads, TCC grants) come with the helper, through `readPrivileged`.
+/// The catalog is in docs/FACTS.md.
 public struct SystemCollectors: Sendable {
     public let runner: CommandRunning
     public let readFile: @Sendable (String) -> Data?
     /// Separate from `readFile`, so an absent file can be told apart from one that exists but can't be read.
     public let fileExists: @Sendable (String) -> Bool
+    public let signatures: CodeSignatureChecking
 
     public init(runner: CommandRunning = ProcessRunner(),
                 readFile: @escaping @Sendable (String) -> Data? = { FileManager.default.contents(atPath: $0) },
-                fileExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) {
+                fileExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+                signatures: CodeSignatureChecking = SecurityFrameworkSignatures()) {
         self.runner = runner
         self.readFile = readFile
         self.fileExists = fileExists
+        self.signatures = signatures
     }
 
     /// A property-list file: absent (nil, nil), read (object, nil), or present but unreadable/corrupt (nil, problem).
@@ -115,6 +118,10 @@ public struct SystemCollectors: Sendable {
         }
 
         collectSoftwareUpdate(into: &facts, notes: &notes)
+
+        let launch = LaunchItemsCollector(fileExists: fileExists, readFile: readFile, signatures: signatures).collect()
+        if let value = launch.value { facts[LaunchItemsCollector.fact] = value }
+        notes.append(launch.note)
         return CollectionResult(facts: facts, notes: notes)
     }
 
