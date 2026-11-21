@@ -114,19 +114,36 @@ public enum HelperClient {
     }
 
     public static func hello() throws -> HelperInfo {
-        let data = try call { h, r in h.hello(clientVersion: FarrierVersion.string, reply: r) }
+        let data = try call { h, r in h.hello(clientVersion: HelperConstants.handshakeVersion, reply: r) }
         guard let info = HelperWire.decode(HelperInfo.self, data) else { throw HelperUnavailable.connection("bad reply") }
         return info
     }
 
+    /// Makes sure the running helper is the installed one before using verbs an older helper may not have.
+    /// `hello` exists in every protocol version; a helper of another version answers it, exits, and launchd starts
+    /// the installed binary on the next connection.
+    public static func ensureCurrent() throws {
+        for attempt in 0..<6 {
+            let info = try hello()
+            if !info.willExit {
+                guard info.protocolVersion == HelperConstants.protocolVersion else {
+                    throw HelperUnavailable.connection("the helper speaks protocol \(info.protocolVersion), this farrier \(HelperConstants.protocolVersion); reinstall Farrier.app")
+                }
+                return
+            }
+            Thread.sleep(forTimeInterval: attempt == 0 ? 1.0 : 2.0)  // give the old helper time to exit
+        }
+        throw HelperUnavailable.connection("the old helper did not restart; try again, or `sudo launchctl kickstart -k system/\(HelperConstants.machService)`")
+    }
+
     public static func whoAmI() throws -> SessionDecision {
-        let data = try call { h, r in h.whoAmI(clientVersion: FarrierVersion.string, reply: r) }
+        let data = try call { h, r in h.whoAmI(clientVersion: HelperConstants.handshakeVersion, reply: r) }
         guard let d = HelperWire.decode(SessionDecision.self, data) else { throw HelperUnavailable.connection("bad reply") }
         return d
     }
 
     public static func readPrivileged(_ fact: PrivilegedFact) throws -> PrivilegedReply {
-        let data = try call { h, r in h.readPrivileged(fact: fact.rawValue, clientVersion: FarrierVersion.string, reply: r) }
+        let data = try call { h, r in h.readPrivileged(fact: fact.rawValue, clientVersion: HelperConstants.handshakeVersion, reply: r) }
         guard let reply = HelperWire.decode(PrivilegedReply.self, data) else { throw HelperUnavailable.connection("bad reply") }
         return reply
     }

@@ -92,6 +92,23 @@ sudo rm -rf /Applications/Farrier.app && sudo ditto build/Farrier.app /Applicati
 as unknown for now (see [docs/FACTS.md](docs/FACTS.md)). On Linux, or to test rules, use
 `swift run farrier posture --facts examples/facts-sample.json`.
 
+**Fixing a finding** (so far: the application firewall) is plan → approve → apply. Set up the approval key once
+(an admin dialog appears), then plan, review, and apply (Touch ID or your password):
+
+```bash
+F=/Applications/Farrier.app/Contents/MacOS/farrier; $F setup
+```
+
+```bash
+F=/Applications/Farrier.app/Contents/MacOS/farrier; $F plan posture
+```
+
+```bash
+F=/Applications/Farrier.app/Contents/MacOS/farrier; $F apply <plan-id>
+```
+
+Settings an MDM profile manages are never planned. `farrier journal verify` checks the record of what was changed.
+
 ## A quick look (planned interface)
 
 ```bash

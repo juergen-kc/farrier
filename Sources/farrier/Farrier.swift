@@ -10,9 +10,9 @@ struct Farrier: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "farrier",
         abstract: "Keep your Mac sound: hygiene, posture, drift, patching and debugging.",
-        discussion: "v0.1: rule packs, unprivileged fact collection and posture evaluation. The privileged helper and the MCP server follow.",
+        discussion: "v0.1: rule packs, fact collection, posture evaluation, the privileged helper, and plan → approve → apply for the first fix (firewall). The MCP server follows.",
         version: version,
-        subcommands: [Posture.self, Facts.self, Rules.self, Helper.self]
+        subcommands: [Posture.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Setup.self, JournalCommand.self, Helper.self]
     )
 }
 

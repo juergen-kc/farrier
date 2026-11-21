@@ -45,16 +45,30 @@ Done:
       helper survives an app reinstall without re-registering. Over SSH the helper refuses both the user
       (session 0x5020, remote) and `sudo` (also not the console user), and the fact is reported as failed.
 
+- [x] Plan → approve → apply for the first fix, `firewall.enable` (T4): canonical plans with a hash and expiry
+      (`farrier plan posture|show|list`), the Secure Enclave approval key in the login keychain with the
+      access-list integrity check (`farrier setup [--rotate]`), admin-authorized enrollment, one-time nonces, the
+      helper's `applyPlan` (verifies and applies in one call, re-checks MDM ownership and the current state), and
+      hash-chained user and helper journals (`farrier journal verify|show`). **Validated** on a macOS 27.2.1 VM
+      (Apple Development signing, no Touch ID): `setup` showed the admin dialog and enrolled the key, and a second
+      run changed nothing; the plan held only the firewall, with FileVault and launch items left out and why;
+      `apply` showed the password prompt with text derived from the plan ("Farrier is trying to apply Farrier plan
+      c0d6f594 (T4): Turn on the application firewall") and turned the firewall on (verified by reading it back);
+      applying again reported `alreadyCompliant`; over SSH, apply was refused at the first helper call, before any
+      prompt; both journals verified intact. After the review fixes: `setup --rotate` staged, enrolled and then
+      promoted a new key (no `group://` entry appears by default, so none is exempted), and cancelling the
+      password prompt changed nothing. Not yet tested: cancelling the admin dialog during rotation, a slow
+      (> 60 s) approval, the integrity check after "Always Allow", an MDM-managed firewall.
+
 To do:
-- Approval key: setup, admin-authorized enrollment, the integrity check with automatic rotation, and the
-  console-session check
+- Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
+  Developer ID signing
 - Packaging: a root-owned `Farrier.app` with an icon; the Homebrew cask installs a `farrier` wrapper script;
   uninstall removes the LaunchDaemon, the enrolled key and the authorization right
 - Full Disk Access onboarding: detect via the helper, open the right Settings pane, and report "unknown" without it
 - MCP server: progress notifications, annotation titles, and letting in-flight requests finish at end of input
-- `farrier-helper` with `readPrivileged` and `setSystemSetting` (small allowlist: firewall,
-  stealth mode, automatic update settings)
-- Plan, approve and apply, with the journal
+- More fixes in the remediation catalog: stealth mode, Gatekeeper, automatic security updates
+- Undo for T4 changes (record the previous state, plan the reverse change)
 - `posture.core` pack: about 25 high-value checks with mSCP mappings
 - Managed-device detection (`managed` findings are not fixable locally)
 - `inventory` with signing and notarization status for launchd jobs, login items and extensions

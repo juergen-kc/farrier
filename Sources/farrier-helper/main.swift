@@ -17,7 +17,11 @@ guard let team = identity.teamID else {
 let clientRequirement = codeRequirement(identifier: HelperConstants.appIdentifier, teamID: team)
 helperLog("starting version=\(FarrierVersion.string) pid=\(getpid()) id=\(identity.identifier ?? "?") team=\(team)")
 
-let lifecycle = Lifecycle(idleTimeout: 60)
+helperLog(Authz.ensureRight())
+
+let lifecycle = Lifecycle(idleTimeout: 60) {
+    HelperService.approvals.hasOutstanding(now: Int64(Date().timeIntervalSince1970))
+}
 
 final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection c: NSXPCConnection) -> Bool {

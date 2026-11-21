@@ -8,7 +8,17 @@ public enum HelperConstants {
     public static let machService = "dev.farrier.helper"       // launchd label and Mach service
     public static let daemonPlist = "dev.farrier.helper.plist" // Farrier.app/Contents/Library/LaunchDaemons/
     /// Bumped when the XPC protocol changes incompatibly.
-    public static let protocolVersion = 1
+    public static let protocolVersion = 2
+    /// What the version handshake compares: the build version AND the protocol, so a protocol change restarts a
+    /// running helper even when the version string stays the same (as it does between development builds).
+    public static var handshakeVersion: String { "\(FarrierVersion.string)+p\(protocolVersion)" }
+
+    /// The helper's authorization right for enrolling or revoking the approval key (rule: authenticate-admin).
+    public static let enrollRight = "dev.farrier.enroll-approval-key"
+    /// Root-owned state: the enrolled public key and the helper's journal.
+    public static let stateDirectory = "/Library/Application Support/Farrier"
+    public static var approvalKeyPath: String { stateDirectory + "/approval-key.pub" }
+    public static var helperJournalPath: String { stateDirectory + "/journal.jsonl" }
 }
 
 /// The code requirement each side pins its peer to: an Apple-issued certificate, the exact identifier, and the
@@ -73,6 +83,60 @@ public struct PrivilegedReply: Codable, Sendable {
     }
 }
 
+/// `approvalKeyStatus`: is a key enrolled, and which one (SHA-256 of its DER encoding).
+public struct ApprovalKeyStatus: Codable, Sendable {
+    public let enrolled: Bool
+    public let fingerprint: String?
+    public let error: String?
+
+    public init(enrolled: Bool, fingerprint: String?, error: String?) {
+        self.enrolled = enrolled
+        self.fingerprint = fingerprint
+        self.error = error
+    }
+}
+
+/// `beginApproval`: a grant, or why there is none.
+public struct BeginApprovalReply: Codable, Sendable {
+    public let grant: ApprovalGrant?
+    public let error: String?
+
+    public init(grant: ApprovalGrant?, error: String?) {
+        self.grant = grant
+        self.error = error
+    }
+}
+
+public struct ItemResult: Codable, Sendable, Equatable {
+    public enum Outcome: String, Codable, Sendable {
+        case applied, alreadyCompliant, refused, failed
+    }
+    public let ruleID: String
+    public let action: String
+    public let outcome: Outcome
+    public let detail: String?
+
+    public init(ruleID: String, action: String, outcome: Outcome, detail: String?) {
+        self.ruleID = ruleID
+        self.action = action
+        self.outcome = outcome
+        self.detail = detail
+    }
+}
+
+/// `applyPlan`: per-item results, or why the whole plan was refused (then `results` is empty).
+public struct ApplyReply: Codable, Sendable {
+    public let planID: String
+    public let results: [ItemResult]
+    public let error: String?
+
+    public init(planID: String, results: [ItemResult], error: String?) {
+        self.planID = planID
+        self.results = results
+        self.error = error
+    }
+}
+
 public enum HelperWire {
     public static func encode<T: Encodable>(_ value: T) -> Data {
         (try? JSONEncoder().encode(value)) ?? Data("{}".utf8)
@@ -89,5 +153,17 @@ public enum HelperWire {
     func hello(clientVersion: String, reply: @escaping (Data) -> Void)
     func whoAmI(clientVersion: String, reply: @escaping (Data) -> Void)
     func readPrivileged(fact: String, clientVersion: String, reply: @escaping (Data) -> Void)
+
+    // Approval key (docs/ARCHITECTURE.md, "Enrollment"). `authorization` is an AuthorizationExternalForm; the helper
+    // asks for `HelperConstants.enrollRight` with interaction allowed, which shows the admin dialog.
+    func approvalKeyStatus(clientVersion: String, reply: @escaping (Data) -> Void)
+    func enrollApprovalKey(publicKey: Data, authorization: Data, clientVersion: String, reply: @escaping (Data) -> Void)
+    func revokeApprovalKey(authorization: Data, clientVersion: String, reply: @escaping (Data) -> Void)
+
+    // Plans (docs/ARCHITECTURE.md, "Approval flow"). `applyPlan` takes the plan's canonical bytes, the signed
+    // payload and its signature, and carries out only `RemediationCatalog` actions. Verifying and applying are one
+    // call, so an approval can never be detached from the plan it covers.
+    func beginApproval(planHash: Data, clientVersion: String, reply: @escaping (Data) -> Void)
+    func applyPlan(plan: Data, payload: Data, signature: Data, clientVersion: String, reply: @escaping (Data) -> Void)
 }
 #endif
