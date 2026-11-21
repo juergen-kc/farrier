@@ -20,6 +20,9 @@ public struct LaunchItemsCollector: Sendable {
     public let signatures: CodeSignatureChecking
     /// The first bytes of a file (to recognise a script by its `#!`), without reading all of a large binary.
     public let readHead: @Sendable (String) -> Data?
+    /// The target of a symbolic link (as stored), or nil if the path isn't one. Only called on paths outside
+    /// privacy-protected folders.
+    public let symlinkDestination: @Sendable (String) -> String?
     public let home: String
 
     public init(home: String = FileManager.default.homeDirectoryForCurrentUser.path,
@@ -28,8 +31,10 @@ public struct LaunchItemsCollector: Sendable {
                 readFile: @escaping @Sendable (String) -> Data? = { FileManager.default.contents(atPath: $0) },
                 listDirectory: @escaping @Sendable (String) -> [String]? = { try? FileManager.default.contentsOfDirectory(atPath: $0) },
                 signatures: CodeSignatureChecking = SecurityFrameworkSignatures(),
-                readHead: (@Sendable (String) -> Data?)? = nil) {
+                readHead: (@Sendable (String) -> Data?)? = nil,
+                symlinkDestination: @escaping @Sendable (String) -> String? = { try? FileManager.default.destinationOfSymbolicLink(atPath: $0) }) {
         self.home = home
+        self.symlinkDestination = symlinkDestination
         self.readHead = readHead ?? { path in
             guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
             defer { try? handle.close() }
@@ -46,9 +51,6 @@ public struct LaunchItemsCollector: Sendable {
         self.signatures = signatures
     }
 
-    /// Interpreters: when one is the program, the script it runs is what matters, and scripts can't be signed.
-    static let interpreters: Set<String> = ["sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh", "python", "python3",
-                                            "perl", "ruby", "osascript", "node", "php", "env"]
     static let searchPath = ["/usr/bin", "/bin", "/usr/sbin", "/sbin", "/usr/libexec"]
 
     public func collect() -> (value: FactValue?, note: CollectionNote) {
@@ -105,55 +107,145 @@ public struct LaunchItemsCollector: Sendable {
         }
         guard let program else { return .object(o) }
         o["program"] = .string(program)
-        if Self.interpreters.contains((program as NSString).lastPathComponent) {
-            let operands = arguments.dropFirst().filter { !$0.hasPrefix("-") }
-            if arguments.contains("-c") || arguments.contains("-e") {
-                o["inlineCommand"] = .bool(true)
-            } else if let script = operands.first {
-                o["script"] = .string(script)
-            }
+        if let operand = Self.interpreterOperand(program: program, arguments: Array(arguments.dropFirst())) {
+            if operand.inline { o["inlineCommand"] = .bool(true) } else if let script = operand.script { o["script"] = .string(script) }
         }
-        guard fileExists(program) else {
+        // Where the path really leads, without ever looking inside a privacy-protected folder (even a stat there
+        // can prompt). `..` and symlinks into such a folder leave the program unchecked, never "missing".
+        guard let resolved = resolvedOutsideProtectedFolders(program) else {
+            o["error"] = .string("the program is in a privacy-protected folder (or reached through one); its signature wasn't checked")
+            return .object(o)
+        }
+        if resolved != program { o["resolvedProgram"] = .string(resolved) }
+        guard fileExists(resolved) else {
             o["programExists"] = .bool(false)
             // A job whose program is gone is a leftover; it's flagged so it gets reviewed and removed.
             o["signature"] = CodeSignatureInfo(valid: false, notarized: false, error: "program not found").factValue
             return .object(o)
         }
         o["programExists"] = .bool(true)
-        if isPrivacyProtected(program) {
-            // Reading it could trigger a privacy prompt for the terminal; the signature stays unknown.
-            o["error"] = .string("the program is in a privacy-protected folder; its signature wasn't checked")
-            return .object(o)
-        }
-        if readHead(program) == Data("#!".utf8) {
+        if readHead(resolved) == Data("#!".utf8) {
             // launchd runs the script itself (through its #! line). Scripts can't be signed, so it's flagged for review.
             o["script"] = .string(program)
             o["signature"] = CodeSignatureInfo(valid: false, notarized: false,
                                                error: "a script (scripts can't be signed); review what it does").factValue
             return .object(o)
         }
-        if cache[program] == nil { cache[program] = .some(signatures.check(path: program)) }
-        if let info = cache[program] ?? nil { o["signature"] = info.factValue }
+        if cache[resolved] == nil { cache[resolved] = .some(signatures.check(path: resolved)) }
+        if let info = cache[resolved] ?? nil { o["signature"] = info.factValue }
         return .object(o)
     }
 
     /// The program launchd runs: `Program`, else `ProgramArguments[0]` (found on the default PATH if relative).
     static func program(from plist: [String: FactValue], fileExists: (String) -> Bool)
         -> (program: String?, arguments: [String], problem: String?) {
-        let arguments = plist["ProgramArguments"]?.array?.compactMap(\.string) ?? []
-        if plist["BundleProgram"] != nil && plist["Program"] == nil && arguments.isEmpty {
-            return (nil, [], "the program is inside an app (BundleProgram); not checked yet")
+        var arguments = plist["ProgramArguments"]?.array?.compactMap(\.string) ?? []
+        // With BundleProgram, launchd runs that (inside the app) whatever ProgramArguments says; checking argv[0]
+        // instead would check the wrong file.
+        if plist["BundleProgram"] != nil {
+            return (nil, arguments, "the program is inside an app (BundleProgram); not checked yet")
         }
-        guard let first = plist["Program"]?.string ?? arguments.first, !first.isEmpty else {
+        guard var first = plist["Program"]?.string ?? arguments.first, !first.isEmpty else {
             return (nil, arguments, "no Program or ProgramArguments")
         }
-        if first.hasPrefix("/") { return (first, arguments, nil) }
-        if let found = searchPath.map({ $0 + "/" + first }).first(where: fileExists) { return (found, arguments, nil) }
-        return (nil, arguments, "program `\(first)` is not an absolute path and wasn't found")
+        func resolve(_ name: String) -> String? {
+            name.hasPrefix("/") ? name : searchPath.map({ $0 + "/" + name }).first(where: fileExists)
+        }
+        guard var path = resolve(first) else {
+            return (nil, arguments, "program `\(first)` is not an absolute path and wasn't found")
+        }
+        // `env [VAR=value…] command …`: the command is what runs.
+        if (path as NSString).lastPathComponent == "env" {
+            let rest = Array(arguments.dropFirst())
+            guard let index = rest.firstIndex(where: { !$0.hasPrefix("-") && !$0.contains("=") }) else {
+                return (nil, arguments, "`env` without a command")
+            }
+            first = rest[index]
+            guard let command = resolve(first) else {
+                return (nil, arguments, "program `\(first)` (run by env) is not an absolute path and wasn't found")
+            }
+            path = command
+            arguments = Array(rest[index...])
+        }
+        return (path, arguments, nil)
     }
 
+    /// For an interpreter, what it runs: a script operand, or an inline command (`sh -c`, `python3 -c`,
+    /// `osascript -e`, …). Nil if the program isn't an interpreter. Options are parsed per interpreter, combined
+    /// short flags included (`-lc`), and parsing stops at the first operand: the script's own arguments don't count.
+    static func interpreterOperand(program: String, arguments: [String]) -> (script: String?, inline: Bool)? {
+        let name = (program as NSString).lastPathComponent
+        let shells: Set<String> = ["sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh"]
+        // Short options that run code given as an argument, and short options that take a separate argument.
+        let inlineFlags: [String: Set<Character>] = [
+            "python": ["c", "m"], "python3": ["c", "m"], "perl": ["e", "E"], "ruby": ["e"], "osascript": ["e"],
+            "node": ["e", "p"], "php": ["r"],
+        ]
+        let takesArgument: [String: Set<Character>] = [
+            "python": ["W", "X"], "python3": ["W", "X"], "perl": ["I", "M"], "ruby": ["I", "r"],
+            "osascript": ["l"], "node": ["r"], "php": ["c", "d"],
+        ]
+        let isShell = shells.contains(name)
+        guard isShell || inlineFlags[name] != nil else { return nil }
+        let inline: Set<Character> = isShell ? ["c"] : inlineFlags[name] ?? []
+        let withArgument: Set<Character> = isShell ? ["o", "O"] : takesArgument[name] ?? []
+
+        var i = 0
+        while i < arguments.count {
+            let a = arguments[i]
+            if a == "--" { return (i + 1 < arguments.count ? arguments[i + 1] : nil, false) }
+            if a == "-" { return (nil, false) }  // reads the program from stdin
+            if a.hasPrefix("--") {
+                if ["--eval", "--print", "--command"].contains(where: { a == $0 || a.hasPrefix($0 + "=") }) { return (nil, true) }
+                i += 1
+                continue
+            }
+            if (a.hasPrefix("-") || (isShell && a.hasPrefix("+"))) && a.count > 1 {
+                let flags = a.dropFirst()
+                if flags.contains(where: inline.contains) { return (nil, true) }
+                if let last = flags.last, withArgument.contains(last) { i += 1 }  // its argument follows
+                i += 1
+                continue
+            }
+            return (a, false)  // the first operand is the script
+        }
+        return (nil, false)
+    }
+
+    /// Folders macOS guards with privacy prompts (Files and Folders, removable and network volumes).
     func isPrivacyProtected(_ path: String) -> Bool {
-        ["Desktop", "Documents", "Downloads", "Library/Mobile Documents", "Pictures", "Movies", "Music"]
-            .contains { path.hasPrefix(home + "/" + $0 + "/") }
+        let folders = ["Desktop", "Documents", "Downloads", "Library/Mobile Documents", "Pictures", "Movies", "Music"]
+            .map { home + "/" + $0 } + ["/Volumes"]
+        return folders.contains { path == $0 || path.hasPrefix($0 + "/") }
+    }
+
+    /// The path with `.`/`..` and symlinks resolved one component at a time, checking each step BEFORE touching it.
+    /// Nil if it leads into a privacy-protected folder, or loops.
+    func resolvedOutsideProtectedFolders(_ path: String) -> String? {
+        var pending = Self.components(path)
+        var resolved: [String] = []
+        var hops = 0
+        while !pending.isEmpty {
+            let c = pending.removeFirst()
+            if c == "." { continue }
+            if c == ".." { _ = resolved.popLast(); continue }
+            let candidate = "/" + (resolved + [c]).joined(separator: "/")
+            if isPrivacyProtected(candidate) { return nil }
+            if let target = symlinkDestination(candidate) {
+                hops += 1
+                if hops > 32 { return nil }
+                // A relative link is relative to the directory that holds it.
+                if target.hasPrefix("/") { resolved = [] }
+                pending = Self.components(target) + pending
+                continue
+            }
+            resolved.append(c)
+        }
+        let result = "/" + resolved.joined(separator: "/")
+        return isPrivacyProtected(result) ? nil : result
+    }
+
+    static func components(_ path: String) -> [String] {
+        path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
     }
 }
