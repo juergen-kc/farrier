@@ -40,7 +40,11 @@ public struct CodeSignatureInfo: Sendable, Equatable {
 
     /// In Gatekeeper's words where it has them ("Notarized Developer ID", "Unnotarized Developer ID").
     public var source: String {
-        if !valid { return error == "unsigned" ? "Unsigned" : "Invalid signature" }
+        if !valid {
+            if error?.hasPrefix("a script") == true { return "Script" }
+            if error == "program not found" { return "Missing program" }
+            return error == "unsigned" ? "Unsigned" : "Invalid signature"
+        }
         if appleSigned { return "Apple" }
         if adhoc { return "Ad hoc" }
         if teamID == nil { return "Unknown signer" }

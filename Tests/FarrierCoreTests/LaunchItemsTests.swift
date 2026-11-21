@@ -104,6 +104,7 @@ struct LaunchItemsTests {
         let gone = try #require(all[d + "/com.example.gone.plist"])
         #expect(gone["programExists"] == .bool(false))
         #expect(gone["signature"]?.object?["valid"] == .bool(false))
+        #expect(gone["signature"]?.object?["source"] == .string("Missing program"))
 
         // Not checkable: app-embedded programs, broken or unreadable plists, privacy-protected folders.
         #expect(all[d + "/com.example.bundle.plist"]?["signature"] == nil)
@@ -133,6 +134,7 @@ struct LaunchItemsTests {
         #expect(x["script"] == .string("/usr/local/libexec/x.sh"))
         #expect(x["signature"]?.object?["valid"] == .bool(false))
         #expect(x["signature"]?.object?["error"]?.string?.contains("a script") == true)
+        #expect(x["signature"]?.object?["source"] == .string("Script"))
         #expect(sigs.checks.isEmpty)
     }
 
