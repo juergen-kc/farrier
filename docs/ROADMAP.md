@@ -80,7 +80,10 @@ Done:
 - [x] Packaging: an app icon (`scripts/make-icon.py` → `Packaging/AppIcon.png` → `AppIcon.icns`), `scripts/install.sh`
       (root-owned app, a `farrier` wrapper on PATH, restarts an old helper), `farrier uninstall` plus
       `Contents/Resources/uninstall.sh` (helper registration, approval key, authorization right, app, wrapper;
-      `--purge` also journals, plans and exceptions), and a Homebrew cask template.
+      `--purge` also journals, plans and exceptions), and a Homebrew cask template. **Validated** on the macOS
+      27.2.1 VM: install (wrapper in /opt/homebrew/bin, posture through it), uninstall (helper unregistered,
+      keychain item, wrapper, app and authorization right gone; journal and exceptions kept), reinstall (macOS
+      kept the Login Items approval, so the helper was enabled at once; setup enrolled a new key).
 
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
