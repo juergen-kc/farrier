@@ -38,6 +38,8 @@ public let helperJournal = Journal(url: URL(fileURLWithPath: HelperConstants.hel
 public struct FarrierContext {
     public var collectFacts: () -> CollectionResult
     public var rulePaths: [String]
+    /// `.bundled` for Farrier's own packs; `.user` for packs given on the command line (they can't plan fixes).
+    public var rulePackSource: RulePack.Source = .bundled
     public var plans: PlanStore
     public var journal: Journal
     public var host: () -> String
@@ -147,7 +149,7 @@ public struct JournalOutput: Codable {
 public enum Operations {
     /// Loads the rule packs and refuses to go on if any has errors (the same checks as `farrier rules lint`).
     public static func packs(_ ctx: FarrierContext) throws -> [RulePack] {
-        let (packs, loadIssues) = RuleLinter.loadPacks(at: ctx.rulePaths, source: .bundled)
+        let (packs, loadIssues) = RuleLinter.loadPacks(at: ctx.rulePaths, source: ctx.rulePackSource)
         let errors = (loadIssues + RuleLinter.lint(packs)).filter { $0.level == .error }
         guard errors.isEmpty else {
             throw OperationError("rule packs have errors: \(errors.map { "\($0)" }.joined(separator: "; "))")

@@ -122,6 +122,14 @@ struct MCPToolTests {
         #expect(ToolCatalog.call("apply_plan", arguments: ["planID": "ffffffff"], context: ctx).isError == true)
     }
 
+    @Test func packsGivenAsUserPacksCannotPlanFixes() throws {
+        // `farrier plan posture --rules …` loads them as user packs: the linter rejects automatic fixes there.
+        var (ctx, dir) = try context()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        ctx.rulePackSource = .user
+        #expect(throws: OperationError.self) { try Operations.planPosture(ctx) }
+    }
+
     @Test func unknownToolsAndPromptsAreErrors() {
         #expect(ToolCatalog.call("shell_run", arguments: [:], context: FarrierContext.live(actor: "test")).isError == true)
         #expect(throws: (any Error).self) { try Runbooks.get("nope") }

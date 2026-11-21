@@ -96,26 +96,18 @@ struct Posture: ParsableCommand {
     var json = false
 
     func run() throws {
-        let (packs, loadIssues) = RuleLinter.loadPacks(at: rulePaths.isEmpty ? defaultRulePaths() : rulePaths, source: .bundled)
-        // The same checks as `farrier rules lint`: duplicate ids and the like must stop evaluation too.
-        let errors = (loadIssues + RuleLinter.lint(packs)).filter { $0.level == .error }
-        guard errors.isEmpty else {
-            for e in errors { FileHandle.standardError.write(Data("\(e)\n".utf8)) }
+        let out: PostureOutput
+        do {
+            out = try Operations.posture(try cliContext(rulePaths: rulePaths, factsFile: facts))
+        } catch let error as OperationError {
+            note("\(error)")
             throw ExitCode(2)
         }
-        let store: StaticFactStore
-        if let facts {
-            store = try StaticFactStore(json: Data(contentsOf: URL(fileURLWithPath: facts)))
-        } else {
-            store = StaticFactStore(collectAllFacts())
-        }
-        let report = PostureEngine.evaluate(packs, facts: store)
-
         if json {
-            try Output.json(report)
+            try Output.json(out)
             return
         }
-        for f in report.findings {
+        for f in out.findings {
             let mark: String
             switch f.status {
             case .pass: mark = "PASS"
@@ -129,9 +121,27 @@ struct Posture: ParsableCommand {
             print(line)
             if let reason = f.reason { print("      \(reason)") }
         }
-        let s = report.summary
+        let s = out.summary
         print("\(s["pass"] ?? 0) passed, \(s["fail"] ?? 0) failed, \(s["unknown"] ?? 0) unknown, \(s["managed"] ?? 0) managed by MDM")
     }
+}
+
+/// The context the CLI commands run in: live by default, with `--rules` and `--facts` overrides. The CLI and the
+/// MCP server go through the same `Operations`, so `--json` output and tool results have the same shape.
+func cliContext(rulePaths: [String], factsFile: String?, explicitRulesAreUserPacks: Bool = false) throws -> FarrierContext {
+    var ctx = FarrierContext.live(actor: "cli")
+    if !rulePaths.isEmpty {
+        ctx.rulePaths = rulePaths
+        if explicitRulesAreUserPacks { ctx.rulePackSource = .user }
+    }
+    if let factsFile {
+        let store = try StaticFactStore(json: Data(contentsOf: URL(fileURLWithPath: factsFile)))
+        let notes = store.facts.keys.sorted().map {
+            CollectionNote(fact: $0, status: .collected, source: "file", detail: factsFile)
+        }
+        ctx.collectFacts = { CollectionResult(facts: store.facts, notes: notes) }
+    }
+    return ctx
 }
 
 // MARK: - farrier facts
@@ -149,14 +159,14 @@ struct Facts: ParsableCommand {
     var save: String?
 
     func run() throws {
-        let result = collectAllFacts()
+        let result = Operations.facts(FarrierContext.live(actor: "cli"))
         if let save {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
             try encoder.encode(result.facts).write(to: URL(fileURLWithPath: save))
         }
         if json {
-            try Output.json(FactsReport(facts: result.facts, notes: result.notes))
+            try Output.json(result)
             return
         }
         for note in result.notes.sorted(by: { $0.fact < $1.fact }) {
@@ -168,10 +178,6 @@ struct Facts: ParsableCommand {
     }
 }
 
-struct FactsReport: Encodable {
-    let facts: [String: FactValue]
-    let notes: [CollectionNote]
-}
 
 // MARK: - farrier helper
 

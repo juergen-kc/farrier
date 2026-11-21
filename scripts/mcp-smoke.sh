@@ -26,5 +26,5 @@ grep -q '"security-checkup"' "$OUT" || fail "prompts/list lacks security-checkup
 if grep -v '^{"' "$OUT" | grep -q .; then fail "non-JSON output on stdout"; fi
 # End of input right after the requests (spike M2b): replies must still arrive.
 requests | "$BIN" mcp > "$OUT"
-grep -q '"fixAction":"firewall.enable"' "$OUT" || echo "::warning::mcp smoke: no reply when stdin closes immediately"
+grep -q '"fixAction":"firewall.enable"' "$OUT" || fail "no reply when stdin closes right after the requests (in-flight calls must finish)"
 echo "mcp smoke: ok"
