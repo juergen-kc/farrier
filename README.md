@@ -115,7 +115,7 @@ Settings an MDM profile manages are never planned. `farrier journal verify` chec
 claude mcp add --scope user farrier -- /Applications/Farrier.app/Contents/MacOS/farrier mcp
 ```
 
-Then ask, for example, "check my Mac's security posture" or use the `/farrier:security-checkup` prompt. The agent can
+Then ask, for example, "check my Mac's security posture" or use the `/mcp__farrier__security-checkup` prompt. The agent can
 plan fixes and start applying them, but a change to system settings only happens after you approve it on the Mac.
 
 ## A quick look (planned interface)

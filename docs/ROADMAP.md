@@ -63,7 +63,12 @@ Done:
 - [x] `farrier mcp`: tools `farrier_status`, `facts_collect`, `posture_check`, `posture_explain`,
       `posture_plan_remediation`, `plan_show`, `apply_plan`, `journal_recent`, and the `security-checkup` prompt, on
       the same operations as the CLI. Annotation titles and hints, structured content, in-flight calls finish at
-      end of input. CI drives it over stdio on Linux and macOS. Not yet validated with Claude Code on a Mac.
+      end of input. CI drives it over stdio on Linux and macOS. **Validated** with Claude Code 2.1.330 on the
+      macOS 27.2.1 VM (auto mode): all eight tools called (confirmed in the wire log), the prompt ran as
+      `/mcp__farrier__security-checkup`, the agent reused the open plan instead of making a second one, reported a
+      cancelled approval and did not retry it, applied after approval and re-checked; journal entries record
+      `mcp:claude-code`. In auto mode Claude Code calls `apply_plan` without asking, so the on-device approval is the
+      only gate, as designed.
 
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
