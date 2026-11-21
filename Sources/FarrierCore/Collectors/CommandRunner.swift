@@ -81,8 +81,10 @@ public struct ProcessRunner: CommandRunning {
         try? out.close()
         try? err.close()
 
-        let stdout = (try? String(contentsOf: outURL, encoding: .utf8)) ?? ""
-        let stderr = (try? String(contentsOf: errURL, encoding: .utf8)) ?? ""
+        // Lenient decoding: one byte that isn't valid UTF-8 must not throw away the whole output (a strict read
+        // returns nothing at all). Invalid bytes become U+FFFD, which no parser matches by accident.
+        let stdout = (try? Data(contentsOf: outURL)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+        let stderr = (try? Data(contentsOf: errURL)).map { String(decoding: $0, as: UTF8.self) } ?? ""
         return CommandResult(status: process.terminationStatus, stdout: stdout, stderr: stderr, timedOut: timedOut)
     }
 }

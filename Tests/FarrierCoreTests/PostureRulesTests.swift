@@ -45,6 +45,12 @@ struct PostureRulesTests {
         #expect(Parsers.listeningTCPPorts("netstat: illegal option") == nil)
     }
 
+    @Test func invalidUTF8DoesNotEmptyTheOutput() throws {
+        // A stray byte (0xFF) in a command's output used to make the whole output read as empty.
+        let r = try #require(ProcessRunner().run("/usr/bin/printf", ["\\377ok tcp4 *.22 LISTEN\\n"]))
+        #expect(r.stdout.contains("ok tcp4 *.22 LISTEN"))
+    }
+
     @Test func sharingRulesReadTheListeningPorts() throws {
         let ports = try #require(Parsers.listeningTCPPorts(netstat))
         let facts: [String: FactValue] = ["network.listeningTCP": ports]
