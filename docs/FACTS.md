@@ -25,6 +25,8 @@ Rules of the road:
 | `mdm.enrollment` | `/usr/bin/profiles status -type enrollment` | `{ dep, mdm, userApproved }` (booleans) |
 | `softwareupdate.prefs` | `/Library/Preferences/com.apple.SoftwareUpdate.plist`, overridden by `/Library/Managed Preferences/com.apple.SoftwareUpdate.plist` | `{ AutomaticCheckEnabled, AutomaticDownload, CriticalUpdateInstall, ConfigDataInstall, AutomaticallyInstallMacOSUpdates, AutomaticallyInstallAppUpdates }`; only the keys that are set |
 | `softwareupdate.managedKeys` | the managed preferences above | the keys a profile sets |
+| `firewall.stealthMode` | `/usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode` | `on`, `off` |
+| `network.listeningTCP` | `/usr/sbin/netstat -anp tcp` (all users' sockets, no privileges needed) | sorted TCP ports listening on a non-loopback address, e.g. `[22, 5900]` |
 | `launchd.items` | the plists in `/Library/LaunchDaemons`, `/Library/LaunchAgents` and `~/Library/LaunchAgents`, and the code signature of each job's program (Security framework, in-process) | a list of `{ label, plist, scope, program, programExists, runAtLoad, keepAlive, disabled, script, inlineCommand, signature: { valid, notarized, appleSigned, adhoc, teamID, identifier, error }, error }` |
 
 About `launchd.items`:

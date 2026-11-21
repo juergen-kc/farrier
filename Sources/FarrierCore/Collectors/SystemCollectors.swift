@@ -83,6 +83,12 @@ public struct SystemCollectors: Sendable {
         Source(fact: "mdm.enrollment", executable: "/usr/bin/profiles", arguments: ["status", "-type", "enrollment"]) {
             Parsers.profilesEnrollment($0.combined)
         },
+        Source(fact: "firewall.stealthMode", executable: "/usr/libexec/ApplicationFirewall/socketfilterfw",
+               arguments: ["--getstealthmode"]) { Parsers.firewallStealthMode($0.combined) },
+        // Sockets of all users are listed without privileges (no process names, which would need root).
+        Source(fact: "network.listeningTCP", executable: "/usr/sbin/netstat", arguments: ["-anp", "tcp"]) {
+            Parsers.listeningTCPPorts($0.stdout)
+        },
     ]
 
     /// Software update settings: the local preferences, with managed preferences (from a profile) taking precedence.

@@ -48,6 +48,30 @@ public enum Parsers {
         return nil
     }
 
+    /// `socketfilterfw --getstealthmode` → "on" | "off". Newer macOS: "Firewall stealth mode is on"; older:
+    /// "Stealth mode enabled".
+    public static func firewallStealthMode(_ text: String) -> FactValue? {
+        guard let word = firstMatch(#"(?i)stealth mode (?:is )?(on|off|enabled|disabled)\b"#, in: text)?.lowercased() else { return nil }
+        return .string(word == "on" || word == "enabled" ? "on" : "off")
+    }
+
+    /// `netstat -anp tcp` → sorted, unique TCP ports listening on a non-loopback address (reachable from the
+    /// network). Requires the "Active Internet connections" header; anything else is unrecognised (nil).
+    public static func listeningTCPPorts(_ text: String) -> FactValue? {
+        guard text.contains("Active Internet connections") else { return nil }
+        var ports = Set<Int>()
+        for line in text.split(separator: "\n") {
+            let cols = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+            guard cols.count >= 6, cols[0].hasPrefix("tcp"), cols.last == "LISTEN" else { continue }
+            let local = cols[3]
+            guard let dot = local.lastIndex(of: "."), let port = Int(local[local.index(after: dot)...]) else { continue }
+            let host = String(local[..<dot])
+            if host.hasPrefix("127.") || host == "::1" || host == "localhost" || host.hasSuffix("%lo0") { continue }  // loopback only
+            ports.insert(port)
+        }
+        return .array(ports.sorted().map { .int($0) })
+    }
+
     /// `sw_vers` → { productName, productVersion, buildVersion }
     public static func swVers(_ text: String) -> FactValue? {
         var o: [String: FactValue] = [:]

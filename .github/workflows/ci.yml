@@ -93,7 +93,8 @@ jobs:
           import json, sys
           notes = {n["fact"]: n for n in json.load(open("facts.json"))["notes"]}
           required = ["os.version", "filevault.status", "sip.status", "gatekeeper.assessments",
-                      "firewall.globalState", "mdm.enrollment", "launchd.items"]
+                      "firewall.globalState", "mdm.enrollment", "launchd.items",
+                      "firewall.stealthMode", "network.listeningTCP"]
           bad = [f"{f}: {notes.get(f, {}).get('status', 'missing')} ({notes.get(f, {}).get('detail')})"
                  for f in required if notes.get(f, {}).get("status") != "collected"]
           bad += [f"{f}: unparsed ({n.get('detail')})" for f, n in notes.items() if n["status"] == "unparsed"]

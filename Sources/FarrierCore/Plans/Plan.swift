@@ -150,6 +150,12 @@ public enum RemediationCatalog {
         summary: "Turn on the application firewall"
     )
 
+    public static let firewallStealthEnable = RemediationAction(
+        id: "firewall.stealthEnable", tier: .t4, fact: "firewall.stealthMode", compliantValues: ["on"],
+        managedPayloadTypes: ["com.apple.security.firewall"],
+        summary: "Turn on the firewall's stealth mode (no replies to pings and probes)"
+    )
+
     /// Accepting or withdrawing an exception changes what posture reports, so it's approved like a system setting.
     public static let exceptionAdd = RemediationAction(
         id: "exception.add", tier: .t4, fact: "launchd.items", compliantValues: [], managedPayloadTypes: [],
@@ -160,7 +166,7 @@ public enum RemediationCatalog {
         summary: "Remove a posture exception"
     )
 
-    public static let all: [RemediationAction] = [firewallEnable, exceptionAdd, exceptionRemove]
+    public static let all: [RemediationAction] = [firewallEnable, firewallStealthEnable, exceptionAdd, exceptionRemove]
 
     public static func action(_ id: String) -> RemediationAction? { all.first { $0.id == id } }
 }
