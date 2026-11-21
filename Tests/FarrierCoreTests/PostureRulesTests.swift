@@ -51,6 +51,19 @@ struct PostureRulesTests {
         #expect(r.stdout.contains("ok tcp4 *.22 LISTEN"))
     }
 
+    @Test func runnerDrainsLargeOutputWithoutStalling() throws {
+        // ~1 MB on stdout and some stderr: more than a pipe buffer holds, so it only works if both are drained.
+        let r = try #require(ProcessRunner().run("/bin/sh", ["-c", "head -c 1000000 /dev/zero | tr '\\0' x; echo oops >&2"], timeout: 20))
+        #expect(r.stdout.count == 1_000_000)
+        #expect(r.stderr == "oops\n")
+        #expect(!r.timedOut)
+    }
+
+    @Test func runnerTimesOut() throws {
+        let r = try #require(ProcessRunner().run("/bin/sleep", ["30"], timeout: 1))
+        #expect(r.timedOut)
+    }
+
     @Test func sharingRulesReadTheListeningPorts() throws {
         let ports = try #require(Parsers.listeningTCPPorts(netstat))
         let facts: [String: FactValue] = ["network.listeningTCP": ports]
