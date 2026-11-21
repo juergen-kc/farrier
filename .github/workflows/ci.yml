@@ -45,6 +45,8 @@ jobs:
           grep -q '"tier" : "T4"' plan.json
           swift run farrier plan list
           swift run farrier journal verify
+      - name: MCP server smoke test
+        run: scripts/mcp-smoke.sh "$(swift build --show-bin-path)/farrier"
 
   # The product target. Later PRs add the macOS-only collectors, helper and MCP server here.
   macos:
@@ -70,6 +72,8 @@ jobs:
       # Without the helper, MDM profiles can't be checked, so nothing may be planned (the firewall is left out).
       - name: Plan on the runner (no helper)
         run: swift run farrier plan posture
+      - name: MCP server smoke test
+        run: scripts/mcp-smoke.sh "$(swift build --show-bin-path)/farrier"
       - name: Fail if any parser didn't recognise its output
         run: |
           swift run farrier facts --json > facts.json

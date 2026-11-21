@@ -1,11 +1,9 @@
 import ArgumentParser
 import FarrierCore
 import FarrierHelperKit
+import FarrierMCP
 import Foundation
 
-/// The user journal (docs/ARCHITECTURE.md, "Journal"). The helper keeps its own, root-owned one.
-let userJournal = Journal(url: FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent("Library/Application Support/Farrier/journal.jsonl"))
 
 func note(_ message: String) {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
@@ -205,7 +203,7 @@ struct JournalCommand: ParsableCommand {
     )
 
     static var journals: [(String, Journal)] {
-        [("user", userJournal), ("helper", Journal(url: URL(fileURLWithPath: HelperConstants.helperJournalPath)))]
+        [("user", userJournal), ("helper", helperJournal)]
     }
 }
 

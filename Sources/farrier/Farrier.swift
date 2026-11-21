@@ -1,18 +1,19 @@
 import ArgumentParser
 import FarrierCore
 import FarrierHelperKit
+import FarrierMCP
 import Foundation
 
 @main
-struct Farrier: ParsableCommand {
+struct Farrier: AsyncParsableCommand {
     static let version = FarrierVersion.string
 
     static let configuration = CommandConfiguration(
         commandName: "farrier",
         abstract: "Keep your Mac sound: hygiene, posture, drift, patching and debugging.",
-        discussion: "v0.1: rule packs, fact collection, posture evaluation, the privileged helper, and plan → approve → apply for the first fix (firewall). The MCP server follows.",
+        discussion: "v0.1: rule packs, fact collection, posture evaluation, the privileged helper, and plan → approve → apply for the first fix (firewall). `farrier mcp` serves the same over MCP (stdio).",
         version: version,
-        subcommands: [Posture.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Setup.self, JournalCommand.self, Helper.self]
+        subcommands: [Posture.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Setup.self, JournalCommand.self, Helper.self, MCPCommand.self]
     )
 }
 
@@ -75,16 +76,6 @@ struct Rules: ParsableCommand {
             }
         }
     }
-}
-
-/// Rule packs when no path is given: those bundled in Farrier.app (`Contents/Resources/rules`) when running from
-/// the app, so the installed CLI works from any directory; otherwise `./rules` (a checkout).
-func defaultRulePaths() -> [String] {
-    if Bundle.main.bundlePath.hasSuffix(".app"), let resources = Bundle.main.resourceURL {
-        let bundled = resources.appendingPathComponent("rules")
-        if FileManager.default.fileExists(atPath: bundled.path) { return [bundled.path] }
-    }
-    return ["rules"]
 }
 
 // MARK: - farrier posture
@@ -180,17 +171,6 @@ struct Facts: ParsableCommand {
 struct FactsReport: Encodable {
     let facts: [String: FactValue]
     let notes: [CollectionNote]
-}
-
-/// T0 facts from the collectors, plus T1 facts from the privileged helper when it's available (macOS, running
-/// from Farrier.app, helper enabled, console session). Without the helper, T1 facts are noted as unavailable.
-func collectAllFacts() -> CollectionResult {
-    let base = SystemCollectors().collect()
-    #if os(macOS)
-    return base.merging(HelperClient.collectPrivilegedFacts())
-    #else
-    return base
-    #endif
 }
 
 // MARK: - farrier helper

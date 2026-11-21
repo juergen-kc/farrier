@@ -19,6 +19,10 @@ let package = Package(
         .package(url: "https://github.com/jpsim/Yams.git", from: "6.0.0"),
         // SHA-256 and P-256 on Linux (CI tests the approval and journal code there). On macOS, CryptoKit is used.
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
+        // The MCP server (`farrier mcp`). Pinned: the MCP SDK spike validated exactly this version with Claude Code
+        // (protocol 2025-11-25). swift-log is needed for the transport wrapper's logger.
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", exact: "0.12.1"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
     ],
     targets: [
         .target(
@@ -33,11 +37,23 @@ let package = Package(
             dependencies: ["FarrierCore"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // What the CLI and the MCP server share (fact collection, posture, plans, apply), and the MCP server.
+        .target(
+            name: "FarrierMCP",
+            dependencies: [
+                "FarrierCore",
+                "FarrierHelperKit",
+                .product(name: "MCP", package: "swift-sdk"),
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .executableTarget(
             name: "farrier",
             dependencies: [
                 "FarrierCore",
                 "FarrierHelperKit",
+                "FarrierMCP",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
         ),
@@ -51,6 +67,8 @@ let package = Package(
             dependencies: [
                 "FarrierCore",
                 "FarrierHelperKit",
+                "FarrierMCP",
+                .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
             ]
         ),
