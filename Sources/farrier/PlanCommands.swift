@@ -294,3 +294,64 @@ func planAndPrint(_ make: (FarrierContext) throws -> PlanOutput) throws {
     printPlan(plan)
     print("\nreview it, then run: farrier apply \(plan.id.prefix(8))")
 }
+
+// MARK: - farrier uninstall
+
+struct Uninstall: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Remove Farrier's per-user state (macOS). For a full uninstall run the script it points to with sudo.",
+        discussion: """
+        Unregisters the privileged helper and deletes the approval key from your login keychain. With --purge, also \
+        your saved plans, journal and logs. The root-owned parts (the app, the enrolled public key, the helper's \
+        authorization right, the `farrier` wrapper) are removed by \
+        `sudo /Applications/Farrier.app/Contents/Resources/uninstall.sh`, which runs this first.
+        """
+    )
+
+    @Flag(help: "Also remove saved plans, the journal and logs.")
+    var purge = false
+
+    @Flag(help: "Don't ask for confirmation.")
+    var yes = false
+
+    func run() throws {
+        try Helper.macOnly()
+        #if os(macOS)
+        if !yes {
+            print("Remove Farrier's helper registration and approval key\(purge ? ", plans, journal and logs" : "")? [y/N] ", terminator: "")
+            guard let answer = readLine(), ["y", "yes"].contains(answer.lowercased()) else {
+                print("nothing removed")
+                return
+            }
+        }
+        var problems: [String] = []
+        let (status, message) = HelperClient.unregister()
+        print("helper: \(status)" + (message.map { " (\($0))" } ?? ""))
+        do {
+            try ApprovalKey.delete()
+            print("approval key: removed from the login keychain")
+        } catch {
+            problems.append("approval key: \(error)")
+        }
+        if purge {
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            for path in [".farrier", "Library/Application Support/Farrier", "Library/Logs/Farrier"] {
+                let url = home.appendingPathComponent(path)
+                guard FileManager.default.fileExists(atPath: url.path) else { continue }
+                do {
+                    try FileManager.default.removeItem(at: url)
+                    print("removed ~/\(path)")
+                } catch {
+                    problems.append("~/\(path): \(error)")
+                }
+            }
+        }
+        for p in problems { note(p) }
+        if ProcessInfo.processInfo.environment["SUDO_USER"] == nil {
+            print("\nto finish (the app, the enrolled key, the authorization right, the wrapper):")
+            print("  sudo /Applications/Farrier.app/Contents/Resources/uninstall.sh\(purge ? " --purge" : "")")
+        }
+        if !problems.isEmpty { throw ExitCode(1) }
+        #endif
+    }
+}

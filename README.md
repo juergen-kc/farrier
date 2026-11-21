@@ -81,12 +81,17 @@ SIGN_IDENTITY="Apple Development: …" ./scripts/build-app.sh
 ```
 
 ```bash
-sudo rm -rf /Applications/Farrier.app && sudo ditto build/Farrier.app /Applications/Farrier.app && sudo chown -R root:wheel /Applications/Farrier.app
+sudo ./scripts/install.sh
 ```
 
 ```bash
-/Applications/Farrier.app/Contents/MacOS/farrier helper register
+farrier helper register
 ```
+
+`install.sh` puts `Farrier.app` in /Applications owned by root and adds a `farrier` wrapper to your PATH
+(`/opt/homebrew/bin` or `/usr/local/bin`). To remove everything again:
+`sudo /Applications/Farrier.app/Contents/Resources/uninstall.sh` (add `--purge` to also delete the journals,
+plans and exceptions).
 
 `farrier facts` and `farrier posture` read this Mac's settings without privileges. Facts that need the helper show
 as unknown for now (see [docs/FACTS.md](docs/FACTS.md)). On Linux, or to test rules, use

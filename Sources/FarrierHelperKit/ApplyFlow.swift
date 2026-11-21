@@ -112,8 +112,9 @@ public enum ApprovalSetup {
             throw error
         }
         if reason != nil {
+            let replacing = ApprovalKey.exists
             try ApprovalKey.promotePending()
-            report.steps.append("the new key replaced the old one")
+            if replacing { report.steps.append("the new key replaced the old one") }
         }
         report.steps.append("enrolled \(fingerprint.prefix(16))…")
         return report
