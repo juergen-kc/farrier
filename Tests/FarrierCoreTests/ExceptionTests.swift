@@ -58,6 +58,15 @@ struct ExceptionTests {
         #expect(other.status == .fail)
         #expect(other.reason?.contains("com.sketchy.agent") == true)
         #expect(other.reason?.contains("parallels") == false)
+        // An accepted vendor's item the rule can't decide on (notarization unknown) is not accepted: unknown stays
+        // unknown, never a pass.
+        let undecided: FactValue = .object(["label": .string("com.parallels.unknown"),
+                                            "signature": .object(["valid": .bool(true), "teamID": .string("4C6364ACXT")])])
+        let stillUnknown = try finding([undecided], [exception()])
+        #expect(stillUnknown.status == .unknown)
+        #expect(stillUnknown.accepted == nil)
+        // A passing item of that vendor isn't "accepted" either; only failures are.
+        #expect(try finding([launchItem("com.parallels.ok", team: "4C6364ACXT", notarized: true)], [exception()]).accepted == nil)
         // An exception for another rule changes nothing.
         let elsewhere = PostureException(ruleID: "posture.core.firewall", teamID: "4C6364ACXT", identifier: nil,
                                          reason: "x", acceptedAt: 0, planID: "p")
@@ -160,6 +169,12 @@ struct ExceptionTests {
         let item = try #require(planned.structuredContent?.objectValue?["plan"]?.objectValue?["items"]?.arrayValue?.first?.objectValue)
         #expect(item["action"] == "exception.add")
         #expect(ToolCatalog.call("posture_plan_exception", arguments: ["teamID": "4C6364ACXT"], context: ctx).isError == true)  // no reason
+        // Wrongly typed optional arguments are errors, not defaults: no team-wide exception, no add instead of remove.
+        #expect(ToolCatalog.call("posture_plan_exception", arguments: ["teamID": "4C6364ACXT", "identifier": 42,
+                                                                       "reason": "typed wrong"], context: ctx).isError == true)
+        #expect(ToolCatalog.call("posture_plan_exception", arguments: ["teamID": "4C6364ACXT", "remove": "true",
+                                                                       "reason": "typed wrong"], context: ctx).isError == true)
+        #expect(ToolCatalog.call("journal_recent", arguments: ["last": "5"], context: ctx).isError == true)
 
         ctx.exceptions = { ([exception()], nil) }
         let listed = ToolCatalog.call("exceptions_list", arguments: [:], context: ctx)

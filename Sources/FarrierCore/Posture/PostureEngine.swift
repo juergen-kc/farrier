@@ -91,8 +91,14 @@ public enum PostureEngine {
                 if var value = facts.value(for: rule.fact) {
                     let applicable = exceptions.filter { $0.ruleID == rule.id }
                     if !applicable.isEmpty, let items = value.array {
+                        // Only items that are known to FAIL the rule are accepted. An item the rule can't decide on
+                        // (say, notarization unknown) stays, so an exception never turns unknown into pass.
                         let (covered, rest) = items.reduce(into: ([FactValue](), [FactValue]())) { acc, item in
-                            if applicable.contains(where: { $0.matches(item) }) { acc.0.append(item) } else { acc.1.append(item) }
+                            let failsAlone: Bool = {
+                                if case .fail = rule.expect.evaluate(.array([item])) { return true }
+                                return false
+                            }()
+                            if failsAlone && applicable.contains(where: { $0.matches(item) }) { acc.0.append(item) } else { acc.1.append(item) }
                         }
                         if !covered.isEmpty {
                             accepted = covered.map { $0.object?["label"]?.string ?? $0.object?["plist"]?.string ?? "item" }

@@ -38,8 +38,13 @@ enum Remediator {
 
     /// Adds or removes an exception in the root-owned exceptions file. The parameters are validated here again;
     /// the plan's text is never trusted.
+    /// Serialises the load–modify–write of the exceptions file across all helper connections (one helper process).
+    private static let exceptionLock = NSLock()
+
     private static func changeException(_ item: PlanItem, planID: String, adding: Bool,
                                         _ result: (ItemResult.Outcome, String?) -> ItemResult) -> ItemResult {
+        exceptionLock.lock()
+        defer { exceptionLock.unlock() }
         let p: ExceptionRules.Parameters
         do {
             p = try ExceptionRules.validate(ruleID: item.ruleID, item.parameters, requireReason: adding)

@@ -167,12 +167,12 @@ public enum ToolCatalog {
                 return try result(Operations.exceptions(ctx))
             case "posture_plan_exception":
                 return try result(Operations.planException(
-                    ctx, ruleID: args["ruleID"]?.stringValue ?? "posture.core.unsigned-launch-items",
-                    teamID: try string(args["teamID"], "teamID"), identifier: args["identifier"]?.stringValue,
-                    reason: args["reason"]?.stringValue, remove: args["remove"]?.boolValue ?? false))
+                    ctx, ruleID: try optionalString(args, "ruleID") ?? "posture.core.unsigned-launch-items",
+                    teamID: try string(args["teamID"], "teamID"), identifier: try optionalString(args, "identifier"),
+                    reason: try optionalString(args, "reason"), remove: try optionalBool(args, "remove") ?? false))
             case "journal_recent":
-                let last = args["last"]?.intValue ?? 20
-                let helper = args["helper"]?.boolValue ?? false
+                let last = try optionalInt(args, "last") ?? 20
+                let helper = try optionalBool(args, "helper") ?? false
                 return try result(Operations.journal(helper ? helperJournal : ctx.journal, name: helper ? "helper" : "user", last: last))
             default:
                 return message("unknown tool \(name)")
@@ -185,6 +185,26 @@ public enum ToolCatalog {
     static func string(_ v: Value?, _ name: String) throws -> String {
         guard let s = v?.stringValue, !s.isEmpty else { throw OperationError("`\(name)` is required") }
         return s
+    }
+
+    // Optional arguments: absent (or null) means the default; present with the wrong type is an error, never
+    // silently "absent" (a numeric identifier must not widen an exception, a "true" string must not flip remove).
+    static func optionalString(_ args: [String: Value], _ key: String) throws -> String? {
+        guard let v = args[key], !v.isNull else { return nil }
+        guard let s = v.stringValue else { throw OperationError("`\(key)` must be a string") }
+        return s
+    }
+
+    static func optionalBool(_ args: [String: Value], _ key: String) throws -> Bool? {
+        guard let v = args[key], !v.isNull else { return nil }
+        guard let b = v.boolValue else { throw OperationError("`\(key)` must be true or false") }
+        return b
+    }
+
+    static func optionalInt(_ args: [String: Value], _ key: String) throws -> Int? {
+        guard let v = args[key], !v.isNull else { return nil }
+        guard let i = v.intValue else { throw OperationError("`\(key)` must be an integer") }
+        return i
     }
 
     static func stringSet(_ v: Value?) throws -> Set<String>? {
