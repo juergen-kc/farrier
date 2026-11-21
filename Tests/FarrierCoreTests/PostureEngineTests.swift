@@ -32,7 +32,7 @@ struct PostureEngineTests {
 
         let launch = try finding(report, "posture.core.unsigned-launch-items")
         #expect(launch.status == .fail)
-        #expect(launch.reason?.contains("item 1") == true)
+        #expect(launch.reason?.contains("\"com.sketchy.agent\"") == true)  // named by its label
 
         // Not collected → unknown, never pass or fail.
         #expect(try finding(report, "posture.core.gatekeeper").status == .unknown)
