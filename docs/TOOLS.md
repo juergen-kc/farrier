@@ -1,6 +1,9 @@
 # MCP tool catalog
 
-> Status: design draft. Names and schemas may change before v0.1.
+> Status: design draft. Names and schemas may change before v0.1. **Implemented so far** (`farrier mcp`):
+> `farrier_status`, `facts_collect`, `posture_check`, `posture_explain`, `posture_plan_remediation`, `plan_show`,
+> `apply_plan`, `journal_recent`, and the `security-checkup` prompt. `farrier_status`, `facts_collect` and
+> `journal_recent` are additions to this catalog.
 
 Every tool:
 - returns `structuredContent` with a published output schema, the same as `farrier … --json`

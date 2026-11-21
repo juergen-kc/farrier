@@ -60,19 +60,25 @@ Done:
       password prompt changed nothing. Not yet tested: cancelling the admin dialog during rotation, a slow
       (> 60 s) approval, the integrity check after "Always Allow", an MDM-managed firewall.
 
+- [x] `farrier mcp`: tools `farrier_status`, `facts_collect`, `posture_check`, `posture_explain`,
+      `posture_plan_remediation`, `plan_show`, `apply_plan`, `journal_recent`, and the `security-checkup` prompt, on
+      the same operations as the CLI. Annotation titles and hints, structured content, in-flight calls finish at
+      end of input. CI drives it over stdio on Linux and macOS. Not yet validated with Claude Code on a Mac.
+
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
   Developer ID signing
 - Packaging: a root-owned `Farrier.app` with an icon; the Homebrew cask installs a `farrier` wrapper script;
   uninstall removes the LaunchDaemon, the enrolled key and the authorization right
 - Full Disk Access onboarding: detect via the helper, open the right Settings pane, and report "unknown" without it
-- MCP server: progress notifications, annotation titles, and letting in-flight requests finish at end of input
+- MCP: progress notifications for long calls; resources (`farrier://plan/{id}`, `farrier://journal/recent`); the
+  other runbook prompts; validation with Claude Desktop
 - More fixes in the remediation catalog: stealth mode, Gatekeeper, automatic security updates
 - Undo for T4 changes (record the previous state, plan the reverse change)
 - `posture.core` pack: about 25 high-value checks with mSCP mappings
 - Managed-device detection (`managed` findings are not fixable locally)
 - `inventory` with signing and notarization status for launchd jobs, login items and extensions
-- CLI with `--json`, and `farrier mcp` exposing posture, inventory and plan tools
+- `inventory` tools in the MCP server, and `--json` everywhere in the CLI
 - `--redact`
 
 ## v0.2: Cleanup

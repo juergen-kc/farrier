@@ -109,6 +109,15 @@ F=/Applications/Farrier.app/Contents/MacOS/farrier; $F apply <plan-id>
 
 Settings an MDM profile manages are never planned. `farrier journal verify` checks the record of what was changed.
 
+**With Claude Code** (or any MCP client): `farrier mcp` serves the same over MCP. Register it once, for every folder:
+
+```bash
+claude mcp add --scope user farrier -- /Applications/Farrier.app/Contents/MacOS/farrier mcp
+```
+
+Then ask, for example, "check my Mac's security posture" or use the `/farrier:security-checkup` prompt. The agent can
+plan fixes and start applying them, but a change to system settings only happens after you approve it on the Mac.
+
 ## A quick look (planned interface)
 
 ```bash
@@ -120,11 +129,6 @@ farrier snapshot && farrier drift    # take a baseline, then diff against it
 farrier explain wake --since 24h     # debugging runbook
 ```
 
-Connecting it to Claude Code:
-
-```bash
-claude mcp add farrier -- farrier mcp
-```
 
 ## Requirements (planned)
 
