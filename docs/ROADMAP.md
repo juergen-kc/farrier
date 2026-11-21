@@ -70,6 +70,10 @@ Done:
       `mcp:claude-code`. In auto mode Claude Code calls `apply_plan` without asking, so the on-device approval is the
       only gate, as designed.
 
+- [x] Posture exceptions: accept a vendor's validly signed items for a rule (Apple Team ID, optional identifier,
+      reason), as T4 plans approved on the Mac and stored by the helper in a root-owned file; `farrier exceptions
+      list|add|remove`, MCP `exceptions_list` and `posture_plan_exception`; findings list what was accepted.
+
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
   Developer ID signing

@@ -11,7 +11,7 @@ struct MCPCommand: AsyncParsableCommand {
         Register it with Claude Code (user scope, so it's available in every folder):
           claude mcp add --scope user farrier -- /Applications/Farrier.app/Contents/MacOS/farrier mcp
         Tools: farrier_status, facts_collect, posture_check, posture_explain, posture_plan_remediation, plan_show, \
-        apply_plan, journal_recent. Applying a plan that changes system settings asks for Touch ID or your password \
+        apply_plan, journal_recent, exceptions_list, posture_plan_exception. Applying a plan that changes system settings asks for Touch ID or your password \
         on the Mac; the agent can't approve it. Set FARRIER_MCP_WIRE_LOG=1 to log every message to \
         ~/Library/Logs/Farrier/mcp-wire.log.
         """
