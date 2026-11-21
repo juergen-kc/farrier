@@ -104,7 +104,9 @@ public struct SecurityFrameworkSignatures: CodeSignatureChecking {
     private func satisfies(_ code: SecStaticCode, _ requirement: String) -> Bool {
         var req: SecRequirement?
         guard SecRequirementCreateWithString(requirement as CFString, [], &req) == errSecSuccess, let req else { return false }
-        return SecStaticCodeCheckValidity(code, [], req) == errSecSuccess
+        // The same executable-only validation as above: a resource problem elsewhere in a large bundle must not
+        // read as "not notarized" or "not Apple".
+        return SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSDoNotValidateResources), req) == errSecSuccess
     }
     #endif
 }

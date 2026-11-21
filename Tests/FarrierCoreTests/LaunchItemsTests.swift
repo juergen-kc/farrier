@@ -33,7 +33,8 @@ private func collector(files: [String: Data], dirs: [String: [String]], programs
         readFile: { files[$0] },
         listDirectory: { dirs[$0] },
         signatures: signatures,
-        readHead: { scripts.contains($0) ? Data("#!".utf8) : Data([0xCF, 0xFA]) })
+        readHead: { scripts.contains($0) ? Data("#!".utf8) : Data([0xCF, 0xFA]) },
+        symlinkDestination: { _ in nil })  // the real /bin is a symlink on Linux; these tests use a fake filesystem
 }
 
 private func items(_ value: FactValue?) throws -> [String: [String: FactValue]] {
@@ -144,6 +145,74 @@ struct LaunchItemsTests {
         #expect(apple.source == "Apple")
         #expect(unsigned.source == "Unsigned")
         #expect(CodeSignatureInfo(valid: true, notarized: false, adhoc: true).source == "Ad hoc")
+    }
+
+    @Test func interpreterOptionsAreParsedPerInterpreter() {
+        func op(_ program: String, _ args: [String]) -> String {
+            guard let r = LaunchItemsCollector.interpreterOperand(program: program, arguments: args) else { return "not an interpreter" }
+            return r.inline ? "inline" : (r.script ?? "none")
+        }
+        #expect(op("/bin/sh", ["-e", "/opt/job.sh"]) == "/opt/job.sh")        // -e: exit on error, not code
+        #expect(op("/bin/sh", ["-lc", "echo hi"]) == "inline")                 // combined flags
+        #expect(op("/bin/sh", ["/opt/x.sh", "-c", "arg"]) == "/opt/x.sh")       // the script's own arguments don't count
+        #expect(op("/bin/bash", ["-o", "pipefail", "/opt/x.sh"]) == "/opt/x.sh") // -o takes an argument
+        #expect(op("/bin/zsh", ["--", "/opt/x.sh"]) == "/opt/x.sh")
+        #expect(op("/usr/bin/python3", ["-W", "ignore", "/opt/x.py"]) == "/opt/x.py")
+        #expect(op("/usr/bin/python3", ["-m", "http.server"]) == "inline")
+        #expect(op("/usr/bin/perl", ["-e", "print 1"]) == "inline")
+        #expect(op("/usr/bin/osascript", ["-e", "beep"]) == "inline")
+        #expect(op("/usr/local/bin/node", ["--eval=1"]) == "inline")
+        #expect(op("/usr/bin/ruby", ["/opt/x.rb"]) == "/opt/x.rb")
+        #expect(op("/opt/example/daemon", ["-c", "x"]) == "not an interpreter")
+    }
+
+    @Test func bundleProgramAndEnvAreResolved() throws {
+        let d = "/Library/LaunchDaemons"
+        let files: [String: Data] = [
+            // ProgramArguments alongside BundleProgram: launchd runs the bundle's program, so argv[0] isn't checked.
+            d + "/bundle.plist": plist(["Label": "bundle", "BundleProgram": "Contents/MacOS/helper", "ProgramArguments": ["/bin/sh"]]),
+            d + "/env.plist": plist(["Label": "env", "ProgramArguments": ["/usr/bin/env", "FOO=1", "python3", "-u", "/opt/x.py"]]),
+        ]
+        let sigs = FakeSignatures(["/bin/sh": apple, "/usr/bin/python3": apple])
+        let (value, _) = collector(files: files, dirs: [d: ["bundle.plist", "env.plist"]],
+                                   programs: ["/bin/sh", "/usr/bin/env", "/usr/bin/python3"], signatures: sigs).collect()
+        let all = try items(value)
+        #expect(all[d + "/bundle.plist"]?["signature"] == nil)
+        #expect(all[d + "/bundle.plist"]?["error"]?.string?.contains("BundleProgram") == true)
+        #expect(sigs.checks["/bin/sh"] == nil)
+        let env = try #require(all[d + "/env.plist"])
+        #expect(env["program"] == .string("/usr/bin/python3"))
+        #expect(env["script"] == .string("/opt/x.py"))
+    }
+
+    @Test func protectedFoldersAreNeverTouched() {
+        final class Calls: @unchecked Sendable { var paths: [String] = [] }
+        let calls = Calls()
+        let links: [String: String] = [
+            "/usr/local/bin/tool": home + "/Documents/tool",   // symlink into Documents
+            "/opt/a/link": "../b/real",                        // relative symlink
+            "/opt/loop": "/opt/loop",
+        ]
+        let c = LaunchItemsCollector(home: home, signatures: FakeSignatures([:]),
+                                     symlinkDestination: { calls.paths.append($0); return links[$0] })
+        #expect(c.resolvedOutsideProtectedFolders(home + "/.local/../Documents/tool") == nil)
+        #expect(c.resolvedOutsideProtectedFolders("/usr/local/bin/tool") == nil)
+        #expect(c.resolvedOutsideProtectedFolders("/opt/a/link") == "/opt/b/real")
+        #expect(c.resolvedOutsideProtectedFolders("/opt/loop") == nil)
+        #expect(c.resolvedOutsideProtectedFolders("/Volumes/USB/agent") == nil)
+        #expect(c.resolvedOutsideProtectedFolders("/opt/example/daemon") == "/opt/example/daemon")
+        // Nothing inside a protected folder (or the folder itself) was ever looked at.
+        #expect(!calls.paths.contains { c.isPrivacyProtected($0) })
+    }
+
+    @Test func aProtectedProgramIsUncheckedNotMissing() throws {
+        let u = home + "/Library/LaunchAgents"
+        let (value, _) = collector(files: [u + "/x.plist": plist(["Label": "x", "Program": home + "/Documents/gone"])],
+                                   dirs: [u: ["x.plist"]], programs: [], signatures: FakeSignatures([:])).collect()
+        let x = try #require(try items(value)[u + "/x.plist"])
+        #expect(x["programExists"] == nil)
+        #expect(x["signature"] == nil)
+        #expect(x["error"]?.string?.contains("privacy-protected") == true)
     }
 
     @Test func anUnlistableFolderMakesTheFactUnknown() {
