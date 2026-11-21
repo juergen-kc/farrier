@@ -83,7 +83,7 @@ struct PostureRulesTests {
 
     @Test func scriptedJobsAreFlaggedByLabel() throws {
         func item(_ label: String, _ extra: [String: FactValue] = [:]) -> FactValue {
-            .object(["label": .string(label)].merging(extra) { $1 })
+            .object(["label": .string(label), "inspected": .bool(true)].merging(extra) { $1 })
         }
         let clean = try finding("posture.core.scripted-launch-items", ["launchd.items": .array([item("a"), item("b")])])
         #expect(clean.status == .pass)
@@ -94,5 +94,11 @@ struct PostureRulesTests {
         #expect(scripted.status == .fail)
         #expect(scripted.reason?.contains("com.example.runner") == true)
         #expect(scripted.reason?.contains("com.example.inline") == true)
+        // A job the collector couldn't inspect (only an error) makes the rule unknown, never a pass...
+        let uninspected: FactValue = .object(["plist": .string("/Library/LaunchDaemons/x.plist"), "error": .string("cannot read the plist")])
+        #expect(try finding("posture.core.scripted-launch-items", ["launchd.items": .array([item("a"), uninspected])]).status == .unknown)
+        // ...while a confirmed script still fails.
+        #expect(try finding("posture.core.scripted-launch-items",
+                            ["launchd.items": .array([uninspected, item("s", ["script": .string("/opt/x.sh")])])]).status == .fail)
     }
 }

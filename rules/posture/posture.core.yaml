@@ -159,6 +159,7 @@ rules:
     expect:
       each:
         all:
+          - { path: inspected, equals: true }   # a job that couldn't be inspected is unknown, never script-free
           - { path: script, exists: false }
           - { path: inlineCommand, exists: false }
     remediation:
