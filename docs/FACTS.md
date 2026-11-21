@@ -25,6 +25,21 @@ Rules of the road:
 | `mdm.enrollment` | `/usr/bin/profiles status -type enrollment` | `{ dep, mdm, userApproved }` (booleans) |
 | `softwareupdate.prefs` | `/Library/Preferences/com.apple.SoftwareUpdate.plist`, overridden by `/Library/Managed Preferences/com.apple.SoftwareUpdate.plist` | `{ AutomaticCheckEnabled, AutomaticDownload, CriticalUpdateInstall, ConfigDataInstall, AutomaticallyInstallMacOSUpdates, AutomaticallyInstallAppUpdates }`; only the keys that are set |
 | `softwareupdate.managedKeys` | the managed preferences above | the keys a profile sets |
+| `launchd.items` | the plists in `/Library/LaunchDaemons`, `/Library/LaunchAgents` and `~/Library/LaunchAgents`, and the code signature of each job's program (Security framework, in-process) | a list of `{ label, plist, scope, program, programExists, runAtLoad, keepAlive, disabled, script, inlineCommand, signature: { valid, notarized, appleSigned, adhoc, teamID, identifier, error }, error }` |
+
+About `launchd.items`:
+- `signature.notarized` is true for notarized code **and for Apple's own code** (which isn't notarized but is trusted
+  the same way). It's missing when it couldn't be determined, which makes the rule *unknown*, never a pass.
+- A job whose program no longer exists is reported with `valid: false`: a leftover that should be reviewed.
+- When the program is an interpreter (`sh`, `python3`, `osascript`, …), the script it runs is in `script` (or
+  `inlineCommand: true`). The signature is the interpreter's; scripts can't be signed. A rule for scripted jobs is
+  planned.
+- Not checked yet, so their items carry an `error` and make the rule unknown: programs inside an app
+  (`BundleProgram`), programs in privacy-protected folders (Desktop, Documents, Downloads, …; reading them could
+  prompt), and plists that can't be read. Apps' embedded jobs registered with SMAppService live in the Background
+  Task Management database instead and need the helper (planned).
+- Only the executable and its signature are validated strictly, not every resource of an app bundle (which takes
+  seconds for large apps).
 
 ## T1: via the privileged helper
 
@@ -40,7 +55,7 @@ caller is in the console session. Otherwise `farrier facts` lists them as `unava
 | Fact | Why privileged | Used by |
 |---|---|---|
 | `mdm.declarationTypes` | Declarative Device Management state needs root | managed-setting detection |
-| `launchd.items` | full launchd plists, signature and notarization checks across `/Library` | `posture.core.unsigned-launch-items` |
+| `launchd.btm` | apps' embedded launchd jobs and login items (Background Task Management, `sfltool dumpbtm` needs root) | inventory, `posture.core.unsigned-launch-items` |
 | `tcc.grants` | `TCC.db` needs Full Disk Access | inventory, posture |
 
 **Until `mdm.payloadTypes` and `mdm.declarationTypes` are collected** (as valid lists of strings), the posture engine

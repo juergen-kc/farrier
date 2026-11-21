@@ -115,10 +115,12 @@ public indirect enum Expectation: Sendable, Hashable {
         case .each(let inner):
             guard let items = value.array else { return .fail("expected a list, got \(value)") }
             let outcomes = items.enumerated().map { index, item -> Outcome in
+                // Name an item by its label or id when it has one, so a failure says which item.
+                let name = (item.object?["label"] ?? item.object?["id"])?.string.map { "\"\($0)\"" } ?? "item \(index)"
                 switch inner.evaluate(item) {
                 case .pass: return .pass
-                case .fail(let r): return .fail("item \(index): \(r)")
-                case .unknown(let r): return .unknown("item \(index): \(r)")
+                case .fail(let r): return .fail("\(name): \(r)")
+                case .unknown(let r): return .unknown("\(name): \(r)")
                 }
             }
             return Outcome.combineAll(outcomes)
