@@ -142,7 +142,7 @@ public enum ToolCatalog {
             case "plan_show":
                 return try result(Operations.show(ctx, id: try string(args["planID"], "planID")))
             case "apply_plan":
-                let out = Operations.apply(ctx, id: try string(args["planID"], "planID"))
+                let out = try Operations.apply(ctx, id: try string(args["planID"], "planID"))
                 let failed = out.error != nil || out.results.contains { $0.outcome == .failed || $0.outcome == .refused }
                 return try result(out, isError: failed)
             case "journal_recent":
@@ -296,7 +296,7 @@ final class WireLog: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("mcp-wire.log")
         if !FileManager.default.fileExists(atPath: url.path) {
-            FileManager.default.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: NSNumber(value: 0o600)])
+            _ = FileManager.default.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: NSNumber(value: 0o600)])
         }
         guard let handle = try? FileHandle(forWritingTo: url) else { return nil }
         _ = try? handle.seekToEnd()
