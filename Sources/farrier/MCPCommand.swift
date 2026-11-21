@@ -1,0 +1,23 @@
+import ArgumentParser
+import FarrierMCP
+
+// MARK: - farrier mcp
+
+struct MCPCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "mcp",
+        abstract: "Run the MCP server on stdin/stdout (for Claude Code and other MCP clients).",
+        discussion: """
+        Register it with Claude Code (user scope, so it's available in every folder):
+          claude mcp add --scope user farrier -- /Applications/Farrier.app/Contents/MacOS/farrier mcp
+        Tools: farrier_status, facts_collect, posture_check, posture_explain, posture_plan_remediation, plan_show, \
+        apply_plan, journal_recent. Applying a plan that changes system settings asks for Touch ID or your password \
+        on the Mac; the agent can't approve it. Set FARRIER_MCP_WIRE_LOG=1 to log every message to \
+        ~/Library/Logs/Farrier/mcp-wire.log.
+        """
+    )
+
+    func run() async throws {
+        try await FarrierMCPServer.run()
+    }
+}

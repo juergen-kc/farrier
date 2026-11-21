@@ -1,11 +1,9 @@
 import ArgumentParser
 import FarrierCore
 import FarrierHelperKit
+import FarrierMCP
 import Foundation
 
-/// The user journal (docs/ARCHITECTURE.md, "Journal"). The helper keeps its own, root-owned one.
-let userJournal = Journal(url: FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent("Library/Application Support/Farrier/journal.jsonl"))
 
 func note(_ message: String) {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
@@ -73,42 +71,24 @@ struct PlanPosture: ParsableCommand {
     func run() throws {
         // Packs given on the command line are user packs: they can't declare automatic fixes, and the planner
         // never plans from them. Only the packs that ship with Farrier (or ./rules in a checkout) can.
-        let (packs, loadIssues) = rulePaths.isEmpty
-            ? RuleLinter.loadPacks(at: defaultRulePaths(), source: .bundled)
-            : RuleLinter.loadPacks(at: rulePaths, source: .user)
-        let errors = (loadIssues + RuleLinter.lint(packs)).filter { $0.level == .error }
-        guard errors.isEmpty else {
-            for e in errors { note("\(e)") }
+        let out: PlanOutput
+        do {
+            let ctx = try cliContext(rulePaths: rulePaths, factsFile: facts, explicitRulesAreUserPacks: true)
+            out = try Operations.planPosture(ctx, ruleIDs: ruleIDs.isEmpty ? nil : Set(ruleIDs))
+        } catch let error as OperationError {
+            note("\(error)")
             throw ExitCode(2)
         }
-        let store: StaticFactStore
-        if let facts {
-            store = try StaticFactStore(json: Data(contentsOf: URL(fileURLWithPath: facts)))
-        } else {
-            store = StaticFactStore(collectAllFacts().facts)
-        }
-        let report = PostureEngine.evaluate(packs, facts: store)
-        let host = HostIdentity.hardwareUUID() ?? "unknown-host"
-        let (plan, skipped) = Planner.plan(report: report, packs: packs, facts: store,
-                                           ruleIDs: ruleIDs.isEmpty ? nil : Set(ruleIDs), host: host)
-        var saved: URL?
-        if let plan {
-            saved = try PlanStore.default.save(plan)
-            try? userJournal.append(JournalRecord(time: plan.createdAt, actor: "cli", planID: plan.id,
-                                                  planHash: (try plan.hash()).hexString, outcome: "planned",
-                                                  detail: "\(plan.items.count) item(s), \(plan.tier.rawValue)"))
-        }
         if json {
-            struct Out: Encodable { let plan: Plan?; let planHash: String?; let skipped: [PlanSkip]; let path: String? }
-            try Output.json(Out(plan: plan, planHash: try plan?.hash().hexString, skipped: skipped, path: saved?.path))
+            try Output.json(out)
             return
         }
-        if let plan { printPlan(plan) } else { print("nothing to fix automatically") }
-        if !skipped.isEmpty {
+        if let plan = out.plan { printPlan(plan) } else { print("nothing to fix automatically") }
+        if !out.skipped.isEmpty {
             print("left out:")
-            for s in skipped { print("  \(s.ruleID): \(s.reason)") }
+            for s in out.skipped { print("  \(s.ruleID): \(s.reason)") }
         }
-        if let plan { print("\nreview it, then run: farrier apply \(plan.id.prefix(8))") }
+        if let plan = out.plan { print("\nreview it, then run: farrier apply \(plan.id.prefix(8))") }
     }
 }
 
@@ -133,8 +113,11 @@ struct PlanShow: ParsableCommand {
     var json = false
 
     func run() throws {
-        let plan = try PlanStore.default.load(id)
-        if json { try Output.json(plan) } else { printPlan(plan) }
+        if json {
+            try Output.json(try Operations.show(FarrierContext.live(actor: "cli"), id: id))
+        } else {
+            printPlan(try PlanStore.default.load(id))
+        }
     }
 }
 
@@ -166,32 +149,16 @@ struct Apply: ParsableCommand {
         let plan = try PlanStore.default.load(id)
         printPlan(plan)
         try Helper.macOnly()
-        #if os(macOS)
-        let hash = (try plan.hash()).hexString
-        do {
-            let reply = try PlanApplier.apply(plan)
-            var failed = false
-            for r in reply.results {
-                print("\(r.outcome.rawValue.padding(toLength: 16, withPad: " ", startingAt: 0)) \(r.ruleID): \(r.detail ?? "")")
-                try? userJournal.append(JournalRecord(time: Int64(Date().timeIntervalSince1970), actor: "cli", planID: plan.id,
-                                                      planHash: hash, ruleID: r.ruleID, action: r.action,
-                                                      outcome: r.outcome.rawValue, detail: r.detail))
-                if r.outcome == .failed || r.outcome == .refused { failed = true }
-            }
-            if let error = reply.error {
-                note("stopped: \(error)")
-                failed = true
-            }
-            if failed { throw ExitCode(1) }
-        } catch let error as ExitCode {
-            throw error
-        } catch {
-            try? userJournal.append(JournalRecord(time: Int64(Date().timeIntervalSince1970), actor: "cli", planID: plan.id,
-                                                  planHash: hash, outcome: "notApplied", detail: "\(error)"))
-            note("not applied: \(error)")
+        // The same operation as the MCP tool `apply_plan`, journal entries included.
+        let out = try Operations.apply(FarrierContext.live(actor: "cli"), id: plan.id)
+        for r in out.results {
+            print("\(r.outcome.rawValue.padding(toLength: 16, withPad: " ", startingAt: 0)) \(r.ruleID): \(r.detail ?? "")")
+        }
+        if let error = out.error {
+            note(out.results.isEmpty ? "not applied: \(error)" : "stopped: \(error)")
             throw ExitCode(1)
         }
-        #endif
+        if out.results.contains(where: { $0.outcome == .failed || $0.outcome == .refused }) { throw ExitCode(1) }
     }
 }
 
@@ -205,7 +172,7 @@ struct JournalCommand: ParsableCommand {
     )
 
     static var journals: [(String, Journal)] {
-        [("user", userJournal), ("helper", Journal(url: URL(fileURLWithPath: HelperConstants.helperJournalPath)))]
+        [("user", userJournal), ("helper", helperJournal)]
     }
 }
 

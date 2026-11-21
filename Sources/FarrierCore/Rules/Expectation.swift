@@ -164,3 +164,22 @@ public enum Outcome: Sendable, Hashable {
         return .fail("none matched: " + reasons.joined(separator: "; "))
     }
 }
+
+extension Expectation: CustomStringConvertible {
+    /// A compact, human-readable form of the rule's expectation (for `posture_explain` and listings).
+    public var description: String {
+        switch self {
+        case .equals(let v): return "equals \(v)"
+        case .notEquals(let v): return "not equal to \(v)"
+        case .oneOf(let vs): return "one of \(vs.map(\.description).joined(separator: ", "))"
+        case .matches(let re): return "matches /\(re)/"
+        case .lessThan(let n): return "less than \(n)"
+        case .greaterThan(let n): return "greater than \(n)"
+        case .exists(let b): return b ? "is set" : "is not set"
+        case .all(let es): return "all of (\(es.map(\.description).joined(separator: "; ")))"
+        case .any(let es): return "any of (\(es.map(\.description).joined(separator: "; ")))"
+        case .each(let e): return "every element \(e)"
+        case .at(let path, let e): return "\(path) \(e)"
+        }
+    }
+}
