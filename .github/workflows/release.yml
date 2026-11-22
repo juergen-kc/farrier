@@ -1,0 +1,145 @@
+name: Release
+
+# Builds, signs (Developer ID), notarizes and publishes Farrier.app when a version tag is pushed:
+#   1. set FarrierVersion.string (Sources/FarrierCore/Version.swift) to X.Y.Z and merge it
+#   2. git tag vX.Y.Z && git push origin vX.Y.Z
+# Run it by hand ("Run workflow") for a dry run: same build and checks, ad hoc signed, nothing notarized or published.
+# Setup (secrets, the `release` environment): docs/RELEASING.md.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  # A dry run on pull requests that change the release pipeline (a manual run needs the workflow on main first).
+  pull_request:
+    paths: [".github/workflows/release.yml", "scripts/build-app.sh", "scripts/render-cask.sh", "Packaging/**"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: ad hoc signing, no notarization, no release"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, sign, notarize, publish
+    runs-on: macos-latest
+    timeout-minutes: 60
+    # Secrets live in the `release` environment, which can require a reviewer before a real release runs.
+    environment: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)) && 'release' || '' }}
+    permissions:
+      contents: write   # to create the GitHub release
+    env:
+      # Only a pushed version tag, or a manual run with dry_run unticked, signs, notarizes and publishes.
+      DRY_RUN: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Version
+        id: version
+        run: |
+          VERSION=$(sed -n 's/.*static let string = "\(.*\)".*/\1/p' Sources/FarrierCore/Version.swift)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$DRY_RUN" != "true" ]]; then
+            # A release tag must match the version compiled in (the helper's handshake uses it).
+            [[ "$GITHUB_REF_TYPE" == "tag" && "v$VERSION" == "$GITHUB_REF_NAME" ]] || {
+              echo "::error::tag $GITHUB_REF_NAME does not match FarrierVersion.string ($VERSION)"; exit 1; }
+            [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::release version must be X.Y.Z, got $VERSION"; exit 1; }
+          fi
+          echo "building $VERSION (dry run: $DRY_RUN)"
+
+      - name: Test
+        run: swift test
+
+      - name: Import the Developer ID certificate
+        if: env.DRY_RUN != 'true'
+        env:
+          CERT_P12: ${{ secrets.DEVELOPER_ID_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          [[ -n "$CERT_P12" && -n "$CERT_PASSWORD" ]] || { echo "::error::DEVELOPER_ID_CERT_P12 / _PASSWORD are not set (docs/RELEASING.md)"; exit 1; }
+          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 24)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -n 1)
+          [[ -n "$IDENTITY" ]] || { echo "::error::no Developer ID Application identity in the certificate"; exit 1; }
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Build Farrier.app
+        run: |
+          [[ "$DRY_RUN" == "true" ]] && export SIGN_IDENTITY=-
+          ./scripts/build-app.sh
+          codesign --verify --strict --verbose=2 build/Farrier.app
+          codesign -dvv build/Farrier.app 2>&1 | grep -E '^(Identifier|TeamIdentifier|Authority|Timestamp|Runtime)' || true
+
+      - name: Notarize and staple
+        if: env.DRY_RUN != 'true'
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_API_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_API_ISSUER_ID }}
+        run: |
+          [[ -n "$NOTARY_KEY_P8" && -n "$NOTARY_KEY_ID" && -n "$NOTARY_ISSUER" ]] || {
+            echo "::error::NOTARY_API_KEY_P8 / _KEY_ID / _ISSUER_ID are not set (docs/RELEASING.md)"; exit 1; }
+          echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          ditto -c -k --keepParent build/Farrier.app "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --key "$RUNNER_TEMP/AuthKey.p8" \
+            --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --wait --timeout 30m --output-format json | tee "$RUNNER_TEMP/notary.json"
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+          STATUS=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$RUNNER_TEMP/notary.json")
+          [[ "$STATUS" == "Accepted" ]] || { echo "::error::notarization: $STATUS"; exit 1; }
+          xcrun stapler staple build/Farrier.app
+          xcrun stapler validate build/Farrier.app
+
+      - name: Gatekeeper check
+        if: env.DRY_RUN != 'true'
+        run: |
+          spctl --assess --type execute -vv build/Farrier.app 2>&1 | tee "$RUNNER_TEMP/spctl.txt"
+          grep -q "source=Notarized Developer ID" "$RUNNER_TEMP/spctl.txt" || { echo "::error::not accepted as Notarized Developer ID"; exit 1; }
+
+      - name: Package
+        id: package
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          mkdir -p dist
+          ZIP="dist/Farrier-$VERSION.zip"
+          ditto -c -k --keepParent build/Farrier.app "$ZIP"
+          SHA=$(shasum -a 256 "$ZIP" | cut -d' ' -f1)
+          (cd dist && shasum -a 256 "$(basename "$ZIP")" > SHA256SUMS)
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            scripts/render-cask.sh "$VERSION" "$SHA" > dist/farrier.rb
+            ruby -c dist/farrier.rb
+          fi
+          ls -l dist
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: farrier-${{ steps.version.outputs.version }}${{ env.DRY_RUN == 'true' && '-dryrun' || '' }}
+          path: dist/
+          retention-days: 14
+
+      - name: Publish the GitHub release
+        if: env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --title "Farrier $GITHUB_REF_NAME" --generate-notes --verify-tag
+
+      - name: Remove the keychain
+        if: always() && env.KEYCHAIN != ''
+        run: security delete-keychain "$KEYCHAIN" || true
