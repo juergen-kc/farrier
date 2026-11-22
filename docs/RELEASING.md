@@ -41,7 +41,9 @@ You need a paid Apple Developer Program membership; the **Account Holder** creat
    - checks that Gatekeeper says `source=Notarized Developer ID`,
    - publishes the GitHub release with `Farrier-X.Y.Z.zip`, `SHA256SUMS` and `farrier.rb` (the Homebrew cask,
      rendered by `scripts/render-cask.sh` with the version and the zip's SHA-256),
-   - commits `farrier.rb` to the Homebrew tap (if `HOMEBREW_TAP_TOKEN` is set).
+   - then, in a separate job, commits the release's `farrier.rb` to the Homebrew tap (if `HOMEBREW_TAP_TOKEN` is set).
+     Tap updates run one at a time and never replace a newer cask with an older one; if that job fails, "Re-run
+     failed jobs" retries only the tap update.
 4. Set `FarrierVersion.string` to the next `-dev` version.
 
 ## Homebrew
