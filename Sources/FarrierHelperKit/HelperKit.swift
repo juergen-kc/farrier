@@ -32,6 +32,9 @@ public func codeRequirement(identifier: String, teamID: String) -> String {
 public enum PrivilegedFact: String, CaseIterable, Sendable {
     /// Payload types of the computer-level configuration profiles (`profiles show` needs root).
     case mdmPayloadTypes = "mdm.payloadTypes"
+    /// TCP ports listening on non-loopback addresses (`netstat` as root). Since macOS 27, an unprivileged
+    /// third-party process sees only its own sockets, so the CLI's own attempt comes back empty.
+    case listeningTCP = "network.listeningTCP"
 }
 
 // MARK: - Wire format (JSON over XPC)

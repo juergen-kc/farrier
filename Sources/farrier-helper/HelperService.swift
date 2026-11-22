@@ -266,6 +266,14 @@ enum PrivilegedFacts {
             if let value = Parsers.profilePayloadTypes(Data(result.stdout.utf8)) { return (value, nil) }
             let snippet = result.combined.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160)
             return (nil, "unrecognised profiles output (exit \(result.status)): \(snippet)")
+        case .listeningTCP:
+            guard let result = ProcessRunner().run("/usr/sbin/netstat", ["-anp", "tcp"], timeout: 15) else {
+                return (nil, "/usr/sbin/netstat not found")
+            }
+            if result.timedOut { return (nil, "netstat timed out") }
+            if let value = Parsers.listeningTCPPorts(result.stdout) { return (value, nil) }
+            let snippet = result.combined.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160)
+            return (nil, "unrecognised netstat output (exit \(result.status)): \(snippet)")
         }
     }
 }

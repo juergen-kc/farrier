@@ -64,6 +64,33 @@ struct PostureRulesTests {
         #expect(r.timedOut)
     }
 
+    @Test func emptyNetstatIsUnavailableNotUnparsed() {
+        // macOS 27 hides other processes' sockets from unprivileged third-party tools: netstat prints nothing.
+        let runner = RecordedRunner(["/usr/sbin/netstat -anp tcp": CommandResult(status: 0, stdout: "")])
+        let result = SystemCollectors(runner: runner, readFile: { _ in nil }, fileExists: { _ in false }).collect()
+        let note = result.notes.first { $0.fact == "network.listeningTCP" }
+        #expect(note?.status == .unavailable)
+        #expect(note?.detail?.contains("helper") == true)
+        #expect(result.facts["network.listeningTCP"] == nil)
+    }
+
+    @Test func mergingKeepsTheNoteOfWhoeverCollected() {
+        let fact = "network.listeningTCP"
+        let t0Empty = CollectionResult(facts: [:], notes: [CollectionNote(fact: fact, status: .unavailable, source: "netstat", detail: "x")])
+        let t0Got = CollectionResult(facts: [fact: .array([.int(22)])], notes: [CollectionNote(fact: fact, status: .collected, source: "netstat", detail: nil)])
+        let helperGot = CollectionResult(facts: [fact: .array([.int(22), .int(5900)])], notes: [CollectionNote(fact: fact, status: .collected, source: "helper", detail: nil)])
+        let helperMissing = CollectionResult(facts: [:], notes: [CollectionNote(fact: fact, status: .unavailable, source: "helper", detail: "y")])
+
+        let a = t0Empty.merging(helperGot)       // macOS 27 with the helper
+        #expect(a.facts[fact] == .array([.int(22), .int(5900)]))
+        #expect(a.notes.map(\.source) == ["helper"])
+        let b = t0Got.merging(helperMissing)     // CI runner: no helper, but the unprivileged read worked
+        #expect(b.facts[fact] == .array([.int(22)]))
+        #expect(b.notes.map(\.status) == [.collected])
+        let c = t0Empty.merging(helperMissing)   // neither: both reasons stay
+        #expect(c.notes.count == 2)
+    }
+
     @Test func sharingRulesReadTheListeningPorts() throws {
         let ports = try #require(Parsers.listeningTCPPorts(netstat))
         let facts: [String: FactValue] = ["network.listeningTCP": ports]

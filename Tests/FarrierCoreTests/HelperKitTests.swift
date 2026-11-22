@@ -27,6 +27,7 @@ struct HelperKitTests {
 
     @Test func privilegedFactsAreAnAllowlist() {
         #expect(PrivilegedFact(rawValue: "mdm.payloadTypes") == .mdmPayloadTypes)
+        #expect(PrivilegedFact(rawValue: "network.listeningTCP") == .listeningTCP)
         #expect(PrivilegedFact(rawValue: "/etc/master.passwd") == nil)
         #expect(PrivilegedFact(rawValue: "../mdm.payloadTypes") == nil)
     }
