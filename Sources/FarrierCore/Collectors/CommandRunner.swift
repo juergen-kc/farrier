@@ -99,8 +99,17 @@ public struct ProcessRunner: CommandRunning {
 
         // Lenient decoding: one byte that isn't valid UTF-8 must not throw away the whole output. Invalid bytes
         // become U+FFFD, which no parser matches by accident.
-        let stdout = String(decoding: out.result(timeout: 2), as: UTF8.self)
-        let stderr = String(decoding: err.result(timeout: 2), as: UTF8.self)
+        let outData = out.result(timeout: 2), errData = err.result(timeout: 2)
+        let stdout = String(decoding: outData, as: UTF8.self)
+        let stderr = String(decoding: errData, as: UTF8.self)
+        if ProcessInfo.processInfo.environment["FARRIER_DEBUG_COMMANDS"] == "1" {
+            // Diagnostics only (stderr, opt-in): what ran and what came back.
+            let elapsed = String(format: "%.2f", Date().timeIntervalSince(deadline.addingTimeInterval(-timeout)))
+            let head = stdout.prefix(120).replacingOccurrences(of: "\n", with: "⏎")
+            FileHandle.standardError.write(Data(("[farrier run] \(([executable] + arguments).joined(separator: " ")) → exit \(process.terminationStatus)"
+                + " reason \(process.terminationReason.rawValue) \(elapsed)s out \(outData.count)B err \(errData.count)B"
+                + (timedOut ? " TIMED OUT" : "") + " | \(head)\n").utf8))
+        }
         return CommandResult(status: process.terminationStatus, stdout: stdout, stderr: stderr, timedOut: timedOut)
     }
 }
