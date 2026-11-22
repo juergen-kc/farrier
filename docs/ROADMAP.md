@@ -27,7 +27,10 @@ needs to be retrofitted.
       `2025-11-25`, and long calls move to the background after 120 s, so the missing Tasks extension doesn't matter.
       **Key finding:** a Full Disk Access grant to the app covers only the helper, not the CLI or MCP server, so all
       protected reads go through the helper. Not yet tested: Claude Desktop.
-- [ ] Signing and notarization pipeline in GitHub Actions, plus a Homebrew cask.
+- [ ] Signing and notarization pipeline in GitHub Actions, plus a Homebrew cask. **Workflow written**
+      (`.github/workflows/release.yml`, docs/RELEASING.md): Developer ID signing from an environment secret,
+      notarytool + staple, a Gatekeeper check, a GitHub release with the zip, SHA256SUMS and the rendered cask.
+      Dry runs (ad hoc) work; the real path needs a Developer ID certificate and an App Store Connect API key.
 - [ ] Fixture capture script for Apple CLI outputs on macOS 14, 15, and 26.
 
 ## v0.1: Foundation and posture
@@ -95,8 +98,8 @@ Done:
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
   Developer ID signing
-- Homebrew cask: the template (`Packaging/homebrew/farrier.rb`, wrapper, root-owned app, uninstall/zap) needs the
-  signed and notarized release pipeline before it can be tested
+- Homebrew cask: the template (`Packaging/homebrew/farrier.rb`) is rendered per release; it still needs a tap
+  repository and a first real (notarized) release to be tested
 - Full Disk Access onboarding: detect via the helper, open the right Settings pane, and report "unknown" without it
 - MCP: progress notifications for long calls; resources (`farrier://plan/{id}`, `farrier://journal/recent`); the
   other runbook prompts; validation with Claude Desktop

@@ -17,9 +17,12 @@ APP="$OUT/Farrier.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Library/LaunchDaemons" "$APP/Contents/Resources"
 
-swift build -c release --product farrier
-swift build -c release --product farrier-helper
-BIN="$(swift build -c release --show-bin-path)"
+# UNIVERSAL=1 builds arm64 and x86_64 into one binary (releases do, so Intel Macs can run them too).
+ARCH_ARGS=()
+[[ "${UNIVERSAL:-}" == "1" ]] && ARCH_ARGS=(--arch arm64 --arch x86_64)
+swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"} --product farrier
+swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"} --product farrier-helper
+BIN="$(swift build -c release ${ARCH_ARGS[@]+"${ARCH_ARGS[@]}"} --show-bin-path)"
 
 cp "$BIN/farrier" "$BIN/farrier-helper" "$APP/Contents/MacOS/"
 sed "s/__VERSION__/$VERSION/g" Packaging/Info.plist > "$APP/Contents/Info.plist"
