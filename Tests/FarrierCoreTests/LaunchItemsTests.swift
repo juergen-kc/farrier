@@ -109,6 +109,9 @@ struct LaunchItemsTests {
 
         // Not checkable: app-embedded programs, broken or unreadable plists, privacy-protected folders.
         #expect(all[d + "/com.example.bundle.plist"]?["signature"] == nil)
+        #expect(daemon["inspected"] == .bool(true))
+        #expect(all[d + "/com.example.bundle.plist"]?["inspected"] == nil)
+        #expect(all[d + "/broken.plist"]?["inspected"] == nil)
         #expect(all[d + "/broken.plist"]?["error"] == .string("cannot parse the plist"))
         #expect(all[d + "/unreadable.plist"]?["error"] == .string("cannot read the plist"))
         let docs = try #require(all[u + "/com.example.docs.plist"])

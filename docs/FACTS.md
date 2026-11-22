@@ -25,7 +25,9 @@ Rules of the road:
 | `mdm.enrollment` | `/usr/bin/profiles status -type enrollment` | `{ dep, mdm, userApproved }` (booleans) |
 | `softwareupdate.prefs` | `/Library/Preferences/com.apple.SoftwareUpdate.plist`, overridden by `/Library/Managed Preferences/com.apple.SoftwareUpdate.plist` | `{ AutomaticCheckEnabled, AutomaticDownload, CriticalUpdateInstall, ConfigDataInstall, AutomaticallyInstallMacOSUpdates, AutomaticallyInstallAppUpdates }`; only the keys that are set |
 | `softwareupdate.managedKeys` | the managed preferences above | the keys a profile sets |
-| `launchd.items` | the plists in `/Library/LaunchDaemons`, `/Library/LaunchAgents` and `~/Library/LaunchAgents`, and the code signature of each job's program (Security framework, in-process) | a list of `{ label, plist, scope, program, programExists, runAtLoad, keepAlive, disabled, script, inlineCommand, signature: { valid, notarized, appleSigned, adhoc, teamID, identifier, error }, error }` |
+| `firewall.stealthMode` | `/usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode` | `on`, `off` |
+| `network.listeningTCP` | `/usr/sbin/netstat -anp tcp`. Unprivileged this works up to macOS 26; on macOS 27 a third-party process sees only its own sockets (netstat prints nothing, reported as `unavailable`), so the helper also collects it as root and its value wins | sorted TCP ports listening on a non-loopback address, e.g. `[22, 5900]` |
+| `launchd.items` | the plists in `/Library/LaunchDaemons`, `/Library/LaunchAgents` and `~/Library/LaunchAgents`, and the code signature of each job's program (Security framework, in-process) | a list of `{ label, plist, scope, program, inspected, programExists, runAtLoad, keepAlive, disabled, script, inlineCommand, signature: { valid, notarized, appleSigned, adhoc, teamID, identifier, error }, error }` |
 
 About `launchd.items`:
 - `signature.notarized` is true for notarized code **and for Apple's own code** (which isn't notarized but is trusted
@@ -54,6 +56,7 @@ caller is in the console session. Otherwise `farrier facts` lists them as `unava
 
 | Fact | Source (run by the helper as root) | Values |
 |---|---|---|
+| `network.listeningTCP` | `/usr/sbin/netstat -anp tcp` as root (see the T0 table) | as above |
 | `mdm.payloadTypes` | `/usr/bin/profiles show -output stdout-xml` | sorted, unique `PayloadType`s of the computer-level profiles; `[]` when none are installed |
 
 ### Planned

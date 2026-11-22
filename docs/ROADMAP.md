@@ -85,6 +85,13 @@ Done:
       keychain item, wrapper, app and authorization right gone; journal and exceptions kept), reinstall (macOS
       kept the Login Items approval, so the helper was enabled at once; setup enrolled a new key).
 
+- [x] More posture rules: firewall stealth mode (with the `firewall.stealthEnable` fix), Remote Management, Screen
+      Sharing and Remote Login (from the listening TCP ports; guidance only, since turning remote access off can lock
+      someone out), and launch jobs that run scripts. **Validated** on the macOS 27.2.1 VM: the stealth fix applied
+      (off → on, read back); the listening ports come from the helper (`[22, 88, 3283, 5900]`), because macOS 27
+      shows an unprivileged third-party process only its own sockets; Remote Login, Remote Management and Screen
+      Sharing fail as they should on that VM.
+
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
   Developer ID signing
@@ -93,7 +100,7 @@ To do:
 - Full Disk Access onboarding: detect via the helper, open the right Settings pane, and report "unknown" without it
 - MCP: progress notifications for long calls; resources (`farrier://plan/{id}`, `farrier://journal/recent`); the
   other runbook prompts; validation with Claude Desktop
-- More fixes in the remediation catalog: stealth mode, Gatekeeper, automatic security updates
+- More fixes in the remediation catalog: Gatekeeper, automatic security updates
 - Undo for T4 changes (record the previous state, plan the reverse change)
 - `posture.core` pack: about 25 high-value checks with mSCP mappings
 - Managed-device detection (`managed` findings are not fixable locally)

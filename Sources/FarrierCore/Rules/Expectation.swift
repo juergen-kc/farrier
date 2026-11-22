@@ -114,6 +114,10 @@ public indirect enum Expectation: Sendable, Hashable {
             return n > limit ? .pass : .fail("expected > \(limit), got \(value)")
         case .each(let inner):
             guard let items = value.array else { return .fail("expected a list, got \(value)") }
+            // "every element is not X" reads better as "the list contains X" than as an item index.
+            if case .notEquals(let unwanted) = inner {
+                return items.contains(where: { $0.matches(unwanted) }) ? .fail("contains \(unwanted)") : .pass
+            }
             let outcomes = items.enumerated().map { index, item -> Outcome in
                 // Name an item by its label or id when it has one, so a failure says which item.
                 let name = (item.object?["label"] ?? item.object?["id"])?.string.map { "\"\($0)\"" } ?? "item \(index)"

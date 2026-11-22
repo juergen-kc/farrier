@@ -40,14 +40,24 @@ echo "installed $DEST (team $TEAM)"
 
 mkdir -p "$PREFIX/bin"
 WRAPPER="$PREFIX/bin/farrier"
-cat > "$WRAPPER.tmp" <<'SH'
+# The prefix may be writable by the user (Homebrew's is), so nothing is written there through a path the user
+# controls: the wrapper is made in a private root-owned directory, and `install -S` puts it in place with a rename,
+# which replaces a symlink at the destination instead of following it.
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+cat > "$STAGE/farrier" <<'SH'
 #!/bin/sh
 # Farrier's command-line wrapper (scripts/install.sh). Not a symlink: the binary must run from inside its bundle.
 exec /Applications/Farrier.app/Contents/MacOS/farrier "$@"
 SH
-chmod 755 "$WRAPPER.tmp"
-mv -f "$WRAPPER.tmp" "$WRAPPER"
+install -S -m 0755 -o root -g wheel "$STAGE/farrier" "$WRAPPER"
 echo "installed $WRAPPER"
+
+# Remember where the wrapper went, so uninstall.sh finds it whatever --prefix was used.
+STATE="/Library/Application Support/Farrier"
+mkdir -p "$STATE" && chown root:wheel "$STATE" && chmod 755 "$STATE"
+printf '%s\n' "$WRAPPER" > "$STAGE/wrapper-path"
+install -S -m 0644 -o root -g wheel "$STAGE/wrapper-path" "$STATE/wrapper-path"
 
 # launchd keeps an already running helper; restart it so the installed build answers (no-op if it isn't running).
 launchctl kickstart -k system/dev.farrier.helper 2>/dev/null || true

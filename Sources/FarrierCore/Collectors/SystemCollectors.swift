@@ -32,8 +32,12 @@ public struct CollectionResult: Sendable {
     }
 
     /// Adds another result (for example the helper's T1 facts) to this one.
+    /// When both have a note for the same fact, the one that collected it wins (the other's note is dropped), so a
+    /// fact is never shown as both collected and unavailable. If both collected it, `other`'s value and note win.
     public func merging(_ other: CollectionResult) -> CollectionResult {
-        CollectionResult(facts: facts.merging(other.facts) { _, new in new }, notes: notes + other.notes)
+        let mine = notes.filter { other.facts[$0.fact] == nil }
+        let theirs = other.notes.filter { other.facts[$0.fact] != nil || facts[$0.fact] == nil }
+        return CollectionResult(facts: facts.merging(other.facts) { _, new in new }, notes: mine + theirs)
     }
 }
 
@@ -83,6 +87,17 @@ public struct SystemCollectors: Sendable {
         Source(fact: "mdm.enrollment", executable: "/usr/bin/profiles", arguments: ["status", "-type", "enrollment"]) {
             Parsers.profilesEnrollment($0.combined)
         },
+        Source(fact: "firewall.stealthMode", executable: "/usr/libexec/ApplicationFirewall/socketfilterfw",
+               arguments: ["--getstealthmode"]) { Parsers.firewallStealthMode($0.combined) },
+        // Sockets of all users are listed without privileges (no process names, which would need root).
+        Source(fact: "network.listeningTCP", executable: "/usr/sbin/netstat", arguments: ["-anp", "tcp"]) {
+            Parsers.listeningTCPPorts($0.stdout)
+        },
+    ]
+
+    /// Commands that legitimately print nothing when run unprivileged, and why.
+    static let emptyOutputHints: [String: String] = [
+        "network.listeningTCP": "no sockets visible without privileges (macOS 27+); the privileged helper collects it",
     ]
 
     /// Software update settings: the local preferences, with managed preferences (from a profile) taking precedence.
@@ -110,6 +125,10 @@ public struct SystemCollectors: Sendable {
             if let value = source.parse(result) {
                 facts[source.fact] = value
                 notes.append(CollectionNote(fact: source.fact, status: .collected, source: label, detail: nil))
+            } else if result.status == 0 && result.combined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      let hint = Self.emptyOutputHints[source.fact] {
+                // Nothing at all, by design of the OS, not a parser problem.
+                notes.append(CollectionNote(fact: source.fact, status: .unavailable, source: label, detail: hint))
             } else {
                 let snippet = result.combined.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160)
                 notes.append(CollectionNote(fact: source.fact, status: result.status == 0 ? .unparsed : .failed,

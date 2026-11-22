@@ -28,7 +28,11 @@ enum Remediator {
 
         switch action.id {
         case RemediationCatalog.firewallEnable.id:
-            return enableFirewall(item, action, runner, result)
+            return setFirewall(item, action, runner, result, name: "firewall", get: "--getglobalstate",
+                               set: ["--setglobalstate", "on"], parse: Parsers.firewallGlobalState)
+        case RemediationCatalog.firewallStealthEnable.id:
+            return setFirewall(item, action, runner, result, name: "stealth mode", get: "--getstealthmode",
+                               set: ["--setstealthmode", "on"], parse: Parsers.firewallStealthMode)
         case RemediationCatalog.exceptionAdd.id, RemediationCatalog.exceptionRemove.id:
             return changeException(item, planID: planID, adding: action.id == RemediationCatalog.exceptionAdd.id, result)
         default:
@@ -74,30 +78,30 @@ enum Remediator {
         return result(.applied, adding ? "accepted \(scope) for \(item.ruleID)" : "removed the exception for \(scope)")
     }
 
-    private static func firewallState(_ runner: CommandRunning) -> String? {
-        guard let r = runner.run(socketfilterfw, ["--getglobalstate"], timeout: 15), !r.timedOut else { return nil }
-        return Parsers.firewallGlobalState(r.combined)?.string
-    }
-
-    private static func enableFirewall(_ item: PlanItem, _ action: RemediationAction, _ runner: CommandRunning,
-                                       _ result: (ItemResult.Outcome, String?) -> ItemResult) -> ItemResult {
-        guard let before = firewallState(runner) else { return result(.failed, "could not read the firewall state") }
-        if action.compliantValues.contains(before) { return result(.alreadyCompliant, "firewall is already \(before)") }
+    /// One application-firewall setting: read it, check it still is what the plan saw, change it with
+    /// socketfilterfw, and report success only if reading it back shows the compliant value.
+    private static func setFirewall(_ item: PlanItem, _ action: RemediationAction, _ runner: CommandRunning,
+                                    _ result: (ItemResult.Outcome, String?) -> ItemResult,
+                                    name: String, get: String, set: [String], parse: (String) -> FactValue?) -> ItemResult {
+        func read() -> String? {
+            guard let r = runner.run(socketfilterfw, [get], timeout: 15), !r.timedOut else { return nil }
+            return parse(r.combined)?.string
+        }
+        guard let before = read() else { return result(.failed, "could not read the \(name) state") }
+        if action.compliantValues.contains(before) { return result(.alreadyCompliant, "\(name) is already \(before)") }
         // The Mac changed since the plan was reviewed: don't act on a picture the user didn't see.
         guard item.observed.string == before else {
-            return result(.refused, "the firewall state changed since planning (\(item.observed) → \(before)); make a new plan")
+            return result(.refused, "the \(name) state changed since planning (\(item.observed) → \(before)); make a new plan")
         }
-        guard let r = runner.run(socketfilterfw, ["--setglobalstate", "on"], timeout: 30) else {
-            return result(.failed, "\(socketfilterfw) not found")
-        }
+        guard let r = runner.run(socketfilterfw, set, timeout: 30) else { return result(.failed, "\(socketfilterfw) not found") }
         if r.timedOut { return result(.failed, "socketfilterfw timed out") }
         // Trust the state, not the exit code or the message.
-        guard let after = firewallState(runner) else { return result(.failed, "could not read the firewall state afterwards") }
+        guard let after = read() else { return result(.failed, "could not read the \(name) state afterwards") }
         guard action.compliantValues.contains(after) else {
             let snippet = r.combined.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160)
-            return result(.failed, "firewall is still \(after) (exit \(r.status)): \(snippet)")
+            return result(.failed, "\(name) is still \(after) (exit \(r.status)): \(snippet)")
         }
-        return result(.applied, "firewall \(before) → \(after)")
+        return result(.applied, "\(name) \(before) → \(after)")
     }
 }
 #endif

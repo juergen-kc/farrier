@@ -110,6 +110,9 @@ public struct LaunchItemsCollector: Sendable {
         if let operand = Self.interpreterOperand(program: program, arguments: Array(arguments.dropFirst())) {
             if operand.inline { o["inlineCommand"] = .bool(true) } else if let script = operand.script { o["script"] = .string(script) }
         }
+        // The program and its arguments were read, so "no script" is a finding, not a gap. Jobs that end earlier
+        // (unreadable plist, BundleProgram, unresolved program) lack this, and rules about scripts treat them as unknown.
+        o["inspected"] = .bool(true)
         // Where the path really leads, without ever looking inside a privacy-protected folder (even a stat there
         // can prompt). `..` and symlinks into such a folder leave the program unchecked, never "missing".
         guard let resolved = resolvedOutsideProtectedFolders(program) else {

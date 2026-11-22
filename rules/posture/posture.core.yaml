@@ -93,3 +93,78 @@ rules:
       guidance: >
         Review each flagged item. Identify the owning app, and remove the item with
         `app_uninstall_plan` if the app is no longer wanted.
+
+  - id: posture.core.firewall-stealth
+    title: Firewall stealth mode is on
+    kind: check
+    severity: low
+    collect: { fact: firewall.stealthMode }
+    expect: { equals: "on" }   # quoted: unquoted on/off are booleans in YAML 1.1
+    managedBy:
+      - payloadType: com.apple.security.firewall
+    remediation:
+      automatic: true
+      action: firewall.stealthEnable
+    mappings:
+      mscp: system_settings_firewall_stealth_mode_enable
+
+  - id: posture.core.remote-management-off
+    title: Remote Management (Apple Remote Desktop) is off
+    kind: check
+    severity: medium
+    collect: { fact: network.listeningTCP }
+    expect: { each: { notEquals: 3283 } }
+    remediation:
+      automatic: false   # turning a remote-access service off can lock out whoever uses it
+      guidance: >
+        If nobody manages this Mac remotely, turn off Remote Management in System Settings → General →
+        Sharing. If an MDM or IT team uses it, leave it on and limit access to specific users there.
+    mappings:
+      mscp: system_settings_remote_management_disable
+
+  - id: posture.core.screen-sharing-off
+    title: Screen Sharing is off
+    kind: check
+    severity: medium
+    collect: { fact: network.listeningTCP }
+    expect: { each: { notEquals: 5900 } }
+    remediation:
+      automatic: false
+      guidance: >
+        If you don't share this Mac's screen, turn off Screen Sharing (and Remote Management, which also
+        opens port 5900) in System Settings → General → Sharing.
+    mappings:
+      mscp: system_settings_screen_sharing_disable
+
+  - id: posture.core.remote-login-off
+    title: Remote Login (SSH) is off
+    kind: check
+    severity: low
+    collect: { fact: network.listeningTCP }
+    expect: { each: { notEquals: 22 } }
+    remediation:
+      automatic: false
+      guidance: >
+        If you don't log in to this Mac over SSH, turn off Remote Login in System Settings → General →
+        Sharing. If you do, keep it, use keys rather than passwords, and limit "Allow access for" to the
+        users who need it.
+    mappings:
+      mscp: system_settings_ssh_disable
+
+  - id: posture.core.scripted-launch-items
+    title: No launch agents or daemons run scripts
+    kind: check
+    severity: medium
+    collect: { fact: launchd.items }
+    expect:
+      each:
+        all:
+          - { path: inspected, equals: true }   # a job that couldn't be inspected is unknown, never script-free
+          - { path: script, exists: false }
+          - { path: inlineCommand, exists: false }
+    remediation:
+      automatic: false
+      guidance: >
+        A launch job that runs a shell, Python or AppleScript script (or an inline command) isn't covered by
+        code signing: whoever can change the script changes what runs. Check what each flagged script does and
+        who can write it; remove the job if its app is gone.

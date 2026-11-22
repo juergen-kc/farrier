@@ -327,6 +327,10 @@ struct Uninstall: ParsableCommand {
         var problems: [String] = []
         let (status, message) = HelperClient.unregister()
         print("helper: \(status)" + (message.map { " (\($0))" } ?? ""))
+        // `unregister` reports failure instead of throwing: anything but "gone" is a problem worth a nonzero exit.
+        if message != nil || !["notRegistered", "notFound"].contains(status) {
+            problems.append("the helper is still registered (\(status))\(message.map { ": \($0)" } ?? "")")
+        }
         do {
             try ApprovalKey.delete()
             print("approval key: removed from the login keychain")
@@ -348,8 +352,11 @@ struct Uninstall: ParsableCommand {
         }
         for p in problems { note(p) }
         if ProcessInfo.processInfo.environment["SUDO_USER"] == nil {
+            // This bundle's own script, wherever the app is installed.
+            let bundle = Bundle.main.bundlePath.hasSuffix(".app") ? Bundle.main.bundlePath : "/Applications/Farrier.app"
+            let script = "'" + (bundle + "/Contents/Resources/uninstall.sh").replacingOccurrences(of: "'", with: "'\\''") + "'"
             print("\nto finish (the app, the enrolled key, the authorization right, the wrapper):")
-            print("  sudo /Applications/Farrier.app/Contents/Resources/uninstall.sh\(purge ? " --purge" : "")")
+            print("  sudo \(script)\(purge ? " --purge" : "")")
         }
         if !problems.isEmpty { throw ExitCode(1) }
         #endif
