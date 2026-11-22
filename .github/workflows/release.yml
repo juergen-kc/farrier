@@ -79,10 +79,16 @@ jobs:
           echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
           echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
 
-      - name: Build Farrier.app
+      - name: Build Farrier.app (universal)
         run: |
           [[ "$DRY_RUN" == "true" ]] && export SIGN_IDENTITY=-
-          ./scripts/build-app.sh
+          # The runner is Apple silicon; releases must run on Intel Macs too.
+          UNIVERSAL=1 ./scripts/build-app.sh
+          for bin in farrier farrier-helper; do
+            ARCHS=$(lipo -archs "build/Farrier.app/Contents/MacOS/$bin")
+            echo "$bin: $ARCHS"
+            [[ "$ARCHS" == *arm64* && "$ARCHS" == *x86_64* ]] || { echo "::error::$bin is not universal ($ARCHS)"; exit 1; }
+          done
           codesign --verify --strict --verbose=2 build/Farrier.app
           codesign -dvv build/Farrier.app 2>&1 | grep -E '^(Identifier|TeamIdentifier|Authority|Timestamp|Runtime)' || true
 
@@ -120,10 +126,10 @@ jobs:
           ditto -c -k --keepParent build/Farrier.app "$ZIP"
           SHA=$(shasum -a 256 "$ZIP" | cut -d' ' -f1)
           (cd dist && shasum -a 256 "$(basename "$ZIP")" > SHA256SUMS)
-          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            scripts/render-cask.sh "$VERSION" "$SHA" > dist/farrier.rb
-            ruby -c dist/farrier.rb
-          fi
+          # Dry runs render the cask too (as X.Y.Z without the -dev suffix), so the renderer and the cask's syntax are
+          # checked long before a real release.
+          scripts/render-cask.sh "${VERSION%%-*}" "$SHA" > dist/farrier.rb
+          ruby -c dist/farrier.rb
           ls -l dist
           echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
 
