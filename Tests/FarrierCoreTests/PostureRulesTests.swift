@@ -95,6 +95,7 @@ struct PostureRulesTests {
         let ports = try #require(Parsers.listeningTCPPorts(netstat))
         let facts: [String: FactValue] = ["network.listeningTCP": ports]
         #expect(try finding("posture.core.remote-login-off", facts).status == .fail)
+        #expect(try finding("posture.core.remote-login-off", facts).reason == "contains 22")
         #expect(try finding("posture.core.screen-sharing-off", facts).status == .fail)
         #expect(try finding("posture.core.remote-management-off", facts).status == .pass)
         // None of them is ever fixed automatically: turning a remote-access service off can lock someone out.
