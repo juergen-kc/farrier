@@ -146,6 +146,30 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* --title "Farrier $GITHUB_REF_NAME" --generate-notes --verify-tag
 
+      # Commits the rendered cask to the tap (juergen-kc/homebrew-farrier) so `brew upgrade` sees the release.
+      # Needs HOMEBREW_TAP_TOKEN: a fine-grained token with "Contents: read and write" on the tap repository only.
+      - name: Update the Homebrew tap
+        if: env.DRY_RUN != 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'juergen-kc/homebrew-farrier' }}
+        run: |
+          if [[ -z "$TAP_TOKEN" ]]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set; copy dist/farrier.rb to $TAP_REPO/Casks/ by hand (docs/RELEASING.md)"
+            exit 0
+          fi
+          VERSION=${{ steps.version.outputs.version }}
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPO}.git" "$RUNNER_TEMP/tap"
+          mkdir -p "$RUNNER_TEMP/tap/Casks"
+          cp dist/farrier.rb "$RUNNER_TEMP/tap/Casks/farrier.rb"
+          cd "$RUNNER_TEMP/tap"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/farrier.rb
+          if git diff --cached --quiet; then echo "the tap already has $VERSION"; exit 0; fi
+          git commit -m "farrier $VERSION"
+          git push origin HEAD
+
       - name: Remove the keychain
         if: always() && env.KEYCHAIN != ''
         run: security delete-keychain "$KEYCHAIN" || true
