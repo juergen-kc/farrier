@@ -123,6 +123,14 @@ Done:
       profile came through with its name and organization. Still open: DDM declarations on enrolled Macs, per-user
       managed preferences.
 
+- [x] Undo for T4 changes: the helper's journal records the state each change replaced (`previous`); `farrier undo
+      <plan>` and MCP `plan_undo` plan the reverse (`firewall.restore`, `firewall.stealthRestore`,
+      `softwareupdate.restoreSecurityAutoInstall`), and the helper restores from its own journal only what that plan
+      changed. Gatekeeper and exceptions have no undo. **Validated** on the macOS 27.2.1 VM: the firewall fix recorded
+      "off", the undo plan restored it (on → off, read back), a second `undo` said "already undone", applying a
+      second, older undo plan for the same change came back `alreadyCompliant` ("already undone") with nothing
+      changed, and a plan applied by the previous version was refused for lack of a recorded state.
+
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
   Developer ID signing
@@ -131,10 +139,6 @@ To do:
   first real (notarized) release to be tested
 - MCP: progress notifications for long calls; resources (`farrier://plan/{id}`, `farrier://journal/recent`); the
   other runbook prompts; validation with Claude Desktop
-- Undo for T4 changes: **written, not yet validated on the VM.** The helper's journal records the state each change
-  replaced (`previous`); `farrier undo <plan>` and MCP `plan_undo` plan the reverse (`firewall.restore`,
-  `firewall.stealthRestore`, `softwareupdate.restoreSecurityAutoInstall`), and the helper restores from its own
-  journal only what that plan changed. Gatekeeper and exceptions have no undo
 - `posture.core` pack: about 25 high-value checks with mSCP mappings
 - `inventory` with signing and notarization status for launchd jobs, login items and extensions
 - `inventory` tools in the MCP server, and `--json` everywhere in the CLI
