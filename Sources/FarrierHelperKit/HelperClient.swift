@@ -51,6 +51,31 @@ public struct FullDiskAccessUnknown: Error, CustomStringConvertible {
     public var description: String { reason }
 }
 
+/// The reply (or failure) of an asynchronous XPC call, whichever comes first.
+final class ReplyBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private let done = DispatchSemaphore(value: 0)
+    private var finished = false
+    private(set) var result: Data?
+    private(set) var failure: String?
+
+    func finish(result: Data? = nil, failure: String? = nil) {
+        let first: Bool = lock.withLock {
+            guard !finished else { return false }
+            finished = true
+            self.result = result
+            self.failure = failure
+            return true
+        }
+        if first { done.signal() }
+    }
+
+    /// True if the call finished in time.
+    func wait(_ timeout: TimeInterval) -> Bool {
+        done.wait(timeout: .now() + timeout) == .success
+    }
+}
+
 /// Registration of the LaunchDaemon (SMAppService) and calls to it over XPC, with the helper's signature pinned.
 public enum HelperClient {
     static var service: SMAppService { SMAppService.daemon(plistName: HelperConstants.daemonPlist) }
@@ -94,7 +119,9 @@ public enum HelperClient {
     }
 
     /// One synchronous XPC call. The helper must be signed with `helperIdentifier` and our own Team ID.
-    static func call(_ body: (FarrierHelperProtocol, @escaping (Data) -> Void) -> Void) throws -> Data {
+    /// With a `timeout`, a helper that doesn't answer in time ends the call (the connection is invalidated) instead
+    /// of blocking; verbs that wait for the user (the admin dialog) are called without one.
+    static func call(timeout: TimeInterval? = nil, _ body: (FarrierHelperProtocol, @escaping (Data) -> Void) -> Void) throws -> Data {
         guard isInAppBundle else { throw HelperUnavailable.notInAppBundle }
         guard let team = SigningIdentity.current().teamID else { throw HelperUnavailable.unsigned }
         guard service.status == .enabled else { throw HelperUnavailable.notRegistered(status) }
@@ -104,6 +131,20 @@ public enum HelperClient {
         connection.setCodeSigningRequirement(codeRequirement(identifier: HelperConstants.helperIdentifier, teamID: team))
         connection.resume()
         defer { connection.invalidate() }
+
+        if let timeout {
+            let box = ReplyBox()
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                let ns = error as NSError
+                box.finish(failure: "\(ns.localizedDescription) (\(ns.domain) \(ns.code))")
+            }
+            guard let helper = proxy as? FarrierHelperProtocol else { throw HelperUnavailable.connection("no proxy") }
+            body(helper) { data in box.finish(result: data) }
+            guard box.wait(timeout) else { throw HelperUnavailable.connection("no reply within \(Int(timeout)) s") }
+            if let failure = box.failure { throw HelperUnavailable.connection(failure) }
+            guard let result = box.result else { throw HelperUnavailable.connection("no reply") }
+            return result
+        }
 
         var result: Data?
         var failure: String?
@@ -118,8 +159,8 @@ public enum HelperClient {
         return result
     }
 
-    public static func hello() throws -> HelperInfo {
-        let data = try call { h, r in h.hello(clientVersion: HelperConstants.handshakeVersion, reply: r) }
+    public static func hello(timeout: TimeInterval? = nil) throws -> HelperInfo {
+        let data = try call(timeout: timeout) { h, r in h.hello(clientVersion: HelperConstants.handshakeVersion, reply: r) }
         guard let info = HelperWire.decode(HelperInfo.self, data) else { throw HelperUnavailable.connection("bad reply") }
         return info
     }
@@ -127,9 +168,9 @@ public enum HelperClient {
     /// Makes sure the running helper is the installed one before using verbs an older helper may not have.
     /// `hello` exists in every protocol version; a helper of another version answers it, exits, and launchd starts
     /// the installed binary on the next connection.
-    public static func ensureCurrent() throws {
+    public static func ensureCurrent(timeout: TimeInterval? = nil) throws {
         for attempt in 0..<6 {
-            let info = try hello()
+            let info = try hello(timeout: timeout)
             if !info.willExit {
                 guard info.protocolVersion == HelperConstants.protocolVersion else {
                     throw HelperUnavailable.connection("the helper speaks protocol \(info.protocolVersion), this farrier \(HelperConstants.protocolVersion); reinstall Farrier.app")
@@ -147,15 +188,17 @@ public enum HelperClient {
         return d
     }
 
-    public static func readPrivileged(_ fact: PrivilegedFact) throws -> PrivilegedReply {
-        let data = try call { h, r in h.readPrivileged(fact: fact.rawValue, clientVersion: HelperConstants.handshakeVersion, reply: r) }
+    public static func readPrivileged(_ fact: PrivilegedFact, timeout: TimeInterval? = nil) throws -> PrivilegedReply {
+        let data = try call(timeout: timeout) { h, r in h.readPrivileged(fact: fact.rawValue, clientVersion: HelperConstants.handshakeVersion, reply: r) }
         guard let reply = HelperWire.decode(PrivilegedReply.self, data) else { throw HelperUnavailable.connection("bad reply") }
         return reply
     }
 
     /// Whether Farrier.app has Full Disk Access: true or false, or why the helper couldn't tell.
-    public static func fullDiskAccess() throws -> Result<Bool, FullDiskAccessUnknown> {
-        let reply = try readPrivileged(.fullDiskAccess)
+    /// Restarts an outdated helper first (after an update), so the answer never comes back as "restarting".
+    public static func fullDiskAccess(timeout: TimeInterval? = nil) throws -> Result<Bool, FullDiskAccessUnknown> {
+        try ensureCurrent(timeout: timeout)
+        let reply = try readPrivileged(.fullDiskAccess, timeout: timeout)
         if case .bool(let granted)? = reply.value { return .success(granted) }
         return .failure(FullDiskAccessUnknown(reason: reply.error ?? "no answer"))
     }
@@ -165,6 +208,9 @@ public enum HelperClient {
     public static func collectPrivilegedFacts() -> CollectionResult {
         var facts: [String: FactValue] = [:]
         var notes: [CollectionNote] = []
+        // An outdated helper (right after an update) would refuse every read while it restarts. If this fails, the
+        // reads below fail too, each with the reason.
+        try? ensureCurrent()
         for fact in PrivilegedFact.allCases {
             do {
                 let reply = try readPrivileged(fact)

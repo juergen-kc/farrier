@@ -311,7 +311,10 @@ struct Helper: ParsableCommand {
             let deadline = Date().addingTimeInterval(TimeInterval(max(timeout, 0)))
             while Date() < deadline {
                 Thread.sleep(forTimeInterval: 2)
-                if case .success(true)? = try? HelperClient.fullDiskAccess() {
+                // Each check is bounded by the time left, so a helper that stalls can't outlast --timeout.
+                let left = deadline.timeIntervalSinceNow
+                guard left > 0 else { break }
+                if case .success(true)? = try? HelperClient.fullDiskAccess(timeout: min(left, 10)) {
                     print("Full Disk Access: granted to Farrier.app")
                     return
                 }
