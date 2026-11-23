@@ -105,6 +105,9 @@ from the helper, and are reported as unavailable, with the reason, when it can't
 [docs/FACTS.md](docs/FACTS.md)). On Linux, or to test rules, use
 `swift run farrier posture --facts examples/facts-sample.json`.
 
+`farrier inventory` lists what's on the Mac: apps and launch jobs with their code signature (those that aren't validly
+signed and notarized are marked `!`), system extensions, profiles, privacy grants, admins and listening ports.
+
 **Fixing a finding** (so far: the application firewall and its stealth mode, Gatekeeper, and automatic security updates) is plan → approve → apply. Set up the approval key once
 (an admin dialog appears), then plan, review, and apply (Touch ID or your password):
 

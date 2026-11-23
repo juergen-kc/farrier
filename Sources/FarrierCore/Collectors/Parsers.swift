@@ -172,6 +172,47 @@ public enum Parsers {
         return .array(summaries.sorted { $0.0 < $1.0 }.map(\.1))
     }
 
+    /// `systemextensionsctl list` → `[{ category, teamID, bundleID, version, name, state, enabled, active }]`.
+    /// Strict: the "N extension(s)" count must match the rows read, or the output isn't trusted (nil).
+    public static func systemExtensions(_ text: String) -> FactValue? {
+        guard let countText = firstMatch(#"^(\d+) extension\(s\)"#, in: text), let count = Int(countText) else { return nil }
+        guard let row = try? NSRegularExpression(pattern: #"^(\*?)\t(\*?)\t(\S+)\t(\S+) \(([^)]*)\)\t(.*)\t\[([^\]]*)\]\s*$"#) else { return nil }
+        var category = ""
+        var items: [FactValue] = []
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init) {
+            if line.hasPrefix("--- ") { category = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces); continue }
+            guard let m = row.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) else { continue }
+            func g(_ i: Int) -> String { Range(m.range(at: i), in: line).map { String(line[$0]) } ?? "" }
+            items.append(.object([
+                "category": .string(category), "enabled": .bool(g(1) == "*"), "active": .bool(g(2) == "*"),
+                "teamID": .string(g(3)), "bundleID": .string(g(4)), "version": .string(g(5)),
+                "name": .string(g(6).trimmingCharacters(in: .whitespaces)), "state": .string(g(7)),
+            ]))
+        }
+        return items.count == count ? .array(items) : nil
+    }
+
+    /// `spctl --assess --type execute -vv <path>` → Gatekeeper's verdict and its source, e.g.
+    /// "<path>: accepted" / "source=Notarized Developer ID". Nil if neither verdict is there for that path.
+    public static func spctlAssessment(_ text: String, path: String) -> (accepted: Bool, source: String?)? {
+        let lines = text.split(separator: "\n").map(String.init)
+        let accepted: Bool
+        if lines.contains("\(path): accepted") { accepted = true }
+        else if lines.contains("\(path): rejected") { accepted = false }
+        else { return nil }
+        let source = lines.first { $0.hasPrefix("source=") }.map { String($0.dropFirst("source=".count)) }
+        return (accepted, source)
+    }
+
+    /// `dscl . -read /Groups/admin GroupMembership` → sorted member names. A group without the key has no members.
+    public static func groupMembers(_ text: String) -> FactValue? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.contains("No such key: GroupMembership") { return .array([]) }
+        guard trimmed.hasPrefix("GroupMembership:") else { return nil }
+        let names = trimmed.dropFirst("GroupMembership:".count).split(whereSeparator: \.isWhitespace).map(String.init)
+        return .array(Set(names).sorted().map(FactValue.string))
+    }
+
     /// A property list (XML or binary) → object. Dates become ISO 8601 strings, data becomes base64.
     public static func propertyList(_ data: Data) -> FactValue? {
         guard let value = try? PropertyListDecoder().decode(FactValue.self, from: data), value.object != nil else { return nil }

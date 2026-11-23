@@ -49,6 +49,8 @@ public struct FarrierContext {
     public var actor: String
     /// Approved posture exceptions (the root-owned file the helper writes).
     public var exceptions: () -> (exceptions: [PostureException], problem: String?) = { ExceptionStore().load() }
+    /// The facts only the inventory needs (apps, system extensions, admins); slower, so not part of `collectFacts`.
+    public var collectInventory: () -> CollectionResult = { InventoryCollector().collect() }
 
     public init(collectFacts: @escaping () -> CollectionResult, rulePaths: [String], plans: PlanStore, journal: Journal,
                 host: @escaping () -> String, applyThroughHelper: @escaping (Plan) throws -> ApplyReply, actor: String) {
@@ -260,6 +262,19 @@ public enum Operations {
                                               reverts: planID))
         return PlanOutput(plan: plan, planHash: hash, skipped: skipped, path: url.path,
                           next: "review the undo plan with the user; applying it asks them for Touch ID or their password on this Mac")
+    }
+
+    /// What's on this Mac: apps, launch jobs, extensions, profiles, privacy grants, admins, ports. Read-only.
+    public static func inventory(_ ctx: FarrierContext, sections: Set<String>? = nil, flaggedOnly: Bool = false) throws -> InventoryReport {
+        if let sections {
+            let unknown = sections.subtracting(Inventory.sectionIDs)
+            guard unknown.isEmpty else {
+                throw OperationError("no such inventory section: \(unknown.sorted().joined(separator: ", ")) "
+                                     + "(sections: \(Inventory.sectionIDs.joined(separator: ", ")))")
+            }
+        }
+        let collected = ctx.collectFacts().merging(ctx.collectInventory())
+        return Inventory.build(facts: collected.facts, notes: collected.notes, only: sections, flaggedOnly: flaggedOnly)
     }
 
     public static func exceptions(_ ctx: FarrierContext) -> ExceptionsOutput {

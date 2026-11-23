@@ -2,7 +2,7 @@
 
 > Status: design draft. Names and schemas may change before v0.1. **Implemented so far** (`farrier mcp`):
 > `farrier_status`, `facts_collect`, `posture_check`, `posture_explain`, `posture_plan_remediation`, `plan_show`,
-> `apply_plan`, `plan_undo`, `journal_recent`, `exceptions_list`, `posture_plan_exception`, and the `security-checkup`
+> `apply_plan`, `plan_undo`, `inventory`, `journal_recent`, `exceptions_list`, `posture_plan_exception`, and the `security-checkup`
 > prompt.
 > `farrier_status`, `facts_collect`, `journal_recent` and the two exception tools are additions to this catalog.
 
@@ -31,7 +31,7 @@ with on-device approval for T3 and T4.
 
 | Tool | Tier | Description |
 |---|---|---|
-| `inventory` | T0/T1 | List launch agents and daemons, login items, background tasks, profiles, system extensions, TCC grants, admins, listening ports, installed apps with signing and notarization status. |
+| `inventory` | T0/T1 | List installed apps and launch agents/daemons with signing and notarization status, system extensions, profiles, TCC grants, admins and listening ports; each section counts what needs a look (`flagged`). Arguments: `sections`, `flaggedOnly`. Login items and background tasks: planned (helper, Background Task Management). |
 | `snapshot_create` | T0 (writes local state) | Save an inventory snapshot. |
 | `snapshot_diff` | T0 | Diff two snapshots (default: latest against now). |
 
