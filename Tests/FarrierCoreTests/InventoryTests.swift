@@ -47,7 +47,7 @@ struct InventoryTests {
                                                                   "CFBundleShortVersionString": "1.2"]),
             "/Applications/Utilities/Tool.app/Contents/Info.plist": plist(["CFBundleDisplayName": "Tool", "CFBundleIdentifier": "com.example.tool"]),
         ]
-        let dirs: [String: [String]] = ["/Applications": ["Good.app", "Utilities", "Broken.app", ".hidden.app"],
+        let dirs: [String: [String]] = ["/Applications": ["Good.app", "Utilities", "Broken.app", ".hidden.app", "GoodLink.app"],
                                         "/Applications/Utilities": ["Tool.app", "readme.txt"]]
         let sigs = FakeSignatures([
             "/Applications/Good.app": CodeSignatureInfo(valid: true, notarized: true, teamID: "ABCDE12345"),
@@ -56,7 +56,8 @@ struct InventoryTests {
         ])
         let collector = InventoryCollector(runner: RecordedRunner([:]), readFile: { files[$0] },
                                            fileExists: { $0 == "/Applications" }, listDirectory: { dirs[$0] },
-                                           signatures: sigs, appFolders: ["/Applications", "/Users/t/Applications"])
+                                           signatures: sigs, appFolders: ["/Applications", "/Users/t/Applications"],
+                                           resolve: { $0 == "/Applications/GoodLink.app" ? "/Applications/Good.app" : $0 })
         let result = collector.collect()
         let apps = try #require(result.facts["apps.installed"]?.array)
         #expect(apps.map { $0.object?["path"]?.string } == ["/Applications/Broken.app", "/Applications/Good.app", "/Applications/Utilities/Tool.app"])
@@ -91,6 +92,8 @@ struct InventoryTests {
         #expect(section("privacyGrants")?.note == FullDiskAccess.missingHint)
         #expect(section("loginItems")?.note?.contains("Background Task Management") == true)
         #expect(Inventory.describe(facts["apps.installed"]!.array![1], section: "apps") == "X — Unnotarized Developer ID, team 4C6364ACXT")
+        #expect(Inventory.describe(.string("root"), section: "admins") == "root")
+        #expect(Inventory.describe(.int(22), section: "listeningPorts") == "22")
         let flagged = Inventory.build(facts: facts, notes: notes, only: ["apps"], flaggedOnly: true)
         #expect(flagged.sections.map(\.id) == ["apps"])
         #expect(flagged.sections.first?.items.count == 1)

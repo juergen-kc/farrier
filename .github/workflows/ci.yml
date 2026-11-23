@@ -85,6 +85,10 @@ jobs:
           swift run farrier inventory --section apps --section systemExtensions --section admins
           swift run farrier inventory --json > inventory.json
           python3 -c 'import json; s={x["id"]: x for x in json.load(open("inventory.json"))["sections"]}; assert s["apps"]["available"] and s["apps"]["items"], s["apps"]; assert s["admins"]["available"], s["admins"]; print("apps:", len(s["apps"]["items"]), "flagged:", s["apps"]["flagged"])'
+          # For comparison: Gatekeeper's own verdict on each flagged app.
+          swift run farrier inventory --section apps --flagged --json \
+            | python3 -c 'import json,sys; [print(a["path"]) for x in json.load(sys.stdin)["sections"] for a in x["items"]]' \
+            | while read -r app; do spctl --assess --type execute -vv "$app" 2>&1 | tr '\n' ' '; echo; done
       # Without the helper, MDM profiles can't be checked, so nothing may be planned (the firewall is left out).
       - name: Plan on the runner (no helper)
         run: swift run farrier plan posture

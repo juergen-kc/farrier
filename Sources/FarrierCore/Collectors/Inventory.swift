@@ -15,19 +15,23 @@ public struct InventoryCollector: Sendable {
     public let signatures: CodeSignatureChecking
     /// Folders scanned for apps: `*.app` in each, and in its sub-folders one level down (e.g. /Applications/Utilities).
     public let appFolders: [String]
+    /// The real path behind symlinks, so an app linked under another name (Xcode.app → Xcode_26.6.app) is listed once.
+    public let resolve: @Sendable (String) -> String
 
     public init(runner: CommandRunning = ProcessRunner(),
                 readFile: @escaping @Sendable (String) -> Data? = { FileManager.default.contents(atPath: $0) },
                 fileExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
                 listDirectory: @escaping @Sendable (String) -> [String]? = { try? FileManager.default.contentsOfDirectory(atPath: $0) },
                 signatures: CodeSignatureChecking = SecurityFrameworkSignatures(),
-                appFolders: [String] = ["/Applications", FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path]) {
+                appFolders: [String] = ["/Applications", FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path],
+                resolve: @escaping @Sendable (String) -> String = { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }) {
         self.runner = runner
         self.readFile = readFile
         self.fileExists = fileExists
         self.listDirectory = listDirectory
         self.signatures = signatures
         self.appFolders = appFolders
+        self.resolve = resolve
     }
 
     public func collect() -> CollectionResult {
@@ -71,6 +75,8 @@ public struct InventoryCollector: Sendable {
                 }
             }
         }
+        var seen = Set<String>()
+        paths = paths.map(resolve).filter { seen.insert($0).inserted }
         var checked = 0
         let items: [FactValue] = paths.sorted().map { path in
             let fallback = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
@@ -162,7 +168,7 @@ public enum Inventory {
 
     /// One line per item, for the CLI.
     public static func describe(_ item: FactValue, section: String) -> String {
-        guard let o = item.object else { return item.description }
+        guard let o = item.object else { return item.string ?? item.description }
         func s(_ k: String) -> String? { o[k]?.string }
         let sig = o["signature"]?.object
         let signer: String? = sig.map { sig -> String in
