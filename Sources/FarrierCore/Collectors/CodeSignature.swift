@@ -106,8 +106,12 @@ public struct SecurityFrameworkSignatures: CodeSignatureChecking {
         let strict = SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures | kSecCSDoNotValidateResources)
         let status = SecStaticCodeCheckValidityWithErrors(code, strict, nil, &cfError)
         guard status == errSecSuccess else {
+            // Security's own message for the status ("invalid Info.plist (plist or signature have been modified)") says
+            // more than the CFError's generic description.
+            let message = SecCopyErrorMessageString(status, nil) as String?
             let reason = status == errSecCSUnsigned ? "unsigned"
-                : (cfError?.takeRetainedValue()).map { CFErrorCopyDescription($0) as String } ?? "invalid (\(status))"
+                : message.map { "\($0) (\(status))" }
+                ?? (cfError?.takeRetainedValue()).map { CFErrorCopyDescription($0) as String } ?? "invalid (\(status))"
             var invalid = CodeSignatureInfo(valid: false, notarized: false, error: reason)
             // A second opinion: Gatekeeper's own assessment (it reads some signatures the strict static check rejects).
             if let (accepted, source) = assess(path) {
