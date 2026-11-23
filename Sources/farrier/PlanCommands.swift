@@ -257,6 +257,8 @@ struct JournalShow: ParsableCommand {
             var line = "\(when)  \(r.actor)  \(r.planID.prefix(8))  \(r.outcome)"
             if let rule = r.ruleID { line += "  \(rule)" }
             if let d = r.detail { line += "  — \(d)" }
+            if let p = r.previous { line += "  (was \(p); `farrier undo \(r.planID.prefix(8))` restores it)" }
+            if let reverted = r.reverts { line += "  (undoes \(reverted.prefix(8)))" }
             print(line)
         }
     }
