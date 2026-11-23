@@ -95,6 +95,16 @@ struct ManagedDeviceTests {
         #expect(f.managed)
         #expect(!f.fixable)
         #expect(f.managedBy == "managed preferences com.apple.SoftwareUpdate (CriticalUpdateInstall)")
+        // A selector without keys matches any key of the domain, but an empty domain manages nothing.
+        let anyKey = ManagedBy(preference: "com.apple.SoftwareUpdate")
+        let rule = CheckRule(id: "t.su", title: "t", severity: .high, fact: "softwareupdate.prefs",
+                             expect: try Expectation.parse(.object(["path": .string("CriticalUpdateInstall"), "equals": .bool(true)])),
+                             managedBy: [anyKey], remediation: Remediation(automatic: true, action: nil, guidance: nil), mappings: [:])
+        let pack = RulePack(id: "t", title: "t", version: 1, rules: [.check(rule)], source: .bundled, file: "t.yaml")
+        facts["mdm.managedPreferences"] = .object(["com.apple.SoftwareUpdate": .array([])])
+        #expect(PostureEngine.evaluate([pack], facts: StaticFactStore(facts)).findings.first?.managed == false)
+        facts["mdm.managedPreferences"] = .object(["com.apple.SoftwareUpdate": .array([.string("AutomaticCheckEnabled")])])
+        #expect(PostureEngine.evaluate([pack], facts: StaticFactStore(facts)).findings.first?.managed == true)
         // Not collected (or malformed): management unknown.
         facts["mdm.managedPreferences"] = .array([])
         #expect(try finding("posture.core.auto-security-updates", facts).managementUnknown)

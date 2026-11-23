@@ -93,7 +93,8 @@ public enum PostureEngine {
 
         /// Which managed preference keys of `m` are set, or nil if `m` isn't a preference selector or none is.
         func managedKeys(_ m: ManagedBy) -> [String]? {
-            guard let domain = m.preference, let keys = preferences?[domain] else { return nil }
+            // A domain with no settings (only profile bookkeeping, filtered out) manages nothing.
+            guard let domain = m.preference, let keys = preferences?[domain], !keys.isEmpty else { return nil }
             guard let wanted = m.keys, !wanted.isEmpty else { return keys.sorted() }
             let hit = wanted.filter(keys.contains)
             return hit.isEmpty ? nil : hit
