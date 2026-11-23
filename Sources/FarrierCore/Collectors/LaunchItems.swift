@@ -224,7 +224,7 @@ public struct LaunchItemsCollector: Sendable {
 
     /// The path with `.`/`..` and symlinks resolved one component at a time, checking each step BEFORE touching it.
     /// Nil if it leads into a privacy-protected folder, or loops.
-    func resolvedOutsideProtectedFolders(_ path: String) -> String? {
+    public func resolvedOutsideProtectedFolders(_ path: String) -> String? {
         var pending = Self.components(path)
         var resolved: [String] = []
         var hops = 0

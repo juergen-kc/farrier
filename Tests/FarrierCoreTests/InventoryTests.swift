@@ -57,7 +57,8 @@ struct InventoryTests {
         let collector = InventoryCollector(runner: RecordedRunner([:]), readFile: { files[$0] },
                                            fileExists: { $0 == "/Applications" }, listDirectory: { dirs[$0] },
                                            signatures: sigs, appFolders: ["/Applications", "/Users/t/Applications"],
-                                           resolve: { $0 == "/Applications/GoodLink.app" ? "/Applications/Good.app" : $0 })
+                                           resolve: { $0 == "/Applications/GoodLink.app" ? "/Applications/Good.app" : $0 },
+                                           isDirectory: { $0 == "/Applications/Utilities" })
         let result = collector.collect()
         let apps = try #require(result.facts["apps.installed"]?.array)
         #expect(apps.map { $0.object?["path"]?.string } == ["/Applications/Broken.app", "/Applications/Good.app", "/Applications/Utilities/Tool.app"])
@@ -68,6 +69,41 @@ struct InventoryTests {
         // Missing tools: unavailable, never empty lists.
         #expect(result.facts["system.extensions"] == nil)
         #expect(result.notes.first { $0.fact == "accounts.admins" }?.status == .unavailable)
+    }
+
+    @Test func appScanNeverLooksCompleteWhenItIsnt() throws {
+        func collector(roots: Set<String>, dirs: [String: [String]], resolve: @escaping @Sendable (String) -> String? = { $0 })
+            -> InventoryCollector {
+            InventoryCollector(runner: RecordedRunner([:]), readFile: { _ in nil }, fileExists: { roots.contains($0) },
+                               listDirectory: { dirs[$0] }, signatures: FakeSignatures([:]),
+                               appFolders: ["/Applications", "/Users/t/Applications"], resolve: resolve,
+                               isDirectory: { dirs[$0] != nil })
+        }
+        // No app folder at all: unavailable, not an empty list.
+        let none = collector(roots: [], dirs: [:]).collect()
+        #expect(none.facts["apps.installed"] == nil)
+        #expect(none.notes.first { $0.fact == "apps.installed" }?.status == .unavailable)
+        // /Applications exists but can't be listed: failed.
+        let unlistable = collector(roots: ["/Applications"], dirs: [:]).collect()
+        #expect(unlistable.facts["apps.installed"] == nil)
+        #expect(unlistable.notes.first { $0.fact == "apps.installed" }?.status == .failed)
+        // A sub-folder that can't be listed, and links into privacy-protected folders: named, never followed.
+        let partial = collector(roots: ["/Applications"],
+                                dirs: ["/Applications": ["Locked", "Docs.app", "DocsFolder", "A.app"], "/Applications/Locked": []],
+                                resolve: { $0.contains("Docs") ? nil : $0 })
+        let dirs2: [String: [String]] = ["/Applications": ["Locked", "Docs.app", "DocsFolder", "A.app"]]
+        let c = InventoryCollector(runner: RecordedRunner([:]), readFile: { _ in nil }, fileExists: { $0 == "/Applications" },
+                                   listDirectory: { dirs2[$0] }, signatures: FakeSignatures([:]),
+                                   appFolders: ["/Applications"], resolve: { $0.contains("Docs") ? nil : $0 },
+                                   isDirectory: { $0 == "/Applications/Locked" })
+        let result = c.collect()
+        let apps = try #require(result.facts["apps.installed"]?.array)
+        #expect(apps.compactMap { $0.object?["path"]?.string } == ["/Applications/A.app", "/Applications/Docs.app"])
+        #expect(apps[1].object?["error"]?.string?.contains("privacy-protected") == true)
+        #expect(apps.allSatisfy(Inventory.needsALook))   // nothing was checked, so nothing is vouched for
+        let detail = try #require(result.notes.first { $0.fact == "apps.installed" }?.detail)
+        #expect(detail.contains("cannot list /Applications/Locked"))
+        #expect(partial.collect().facts["apps.installed"] != nil)
     }
 
     @Test func reportCountsWhatNeedsALookAndSaysWhatsMissing() throws {
@@ -122,9 +158,16 @@ struct InventoryTests {
         #expect(edge.source == "Notarized Developer ID")
         #expect(!Inventory.needsALook(.object(["path": .string("/Applications/Microsoft Edge.app"), "signature": edge.factValue])))
         // The strict static check rejects a script-based bundle that Gatekeeper accepts.
-        let idle = CodeSignatureInfo(valid: false, notarized: true, error: "unsigned", gatekeeperAccepted: true,
-                                     gatekeeperSource: "Notarized Developer ID")
+        let idle = CodeSignatureInfo(valid: true, notarized: true, error: "unsigned", gatekeeperAccepted: true,
+                                     gatekeeperSource: "Notarized Developer ID", staticValid: false)
         #expect(!Inventory.needsALook(.object(["path": .string("/Applications/Python 3.11/IDLE.app"), "signature": idle.factValue])))
+        #expect(idle.factValue.object?["staticValid"] == .bool(false))   // the static check's verdict is kept
+        // The posture rule agrees with the inventory: a launch job Gatekeeper accepts as notarized passes.
+        let (packs, _) = RuleLinter.loadPacks(at: [repoRoot.appendingPathComponent("rules/posture").path], source: .bundled)
+        let job: FactValue = .object(["label": .string("org.python.idle-helper"), "inspected": .bool(true), "signature": idle.factValue])
+        let finding = PostureEngine.evaluate(packs, facts: StaticFactStore(["launchd.items": .array([job])])).findings
+            .first { $0.ruleID == "posture.core.unsigned-launch-items" }
+        #expect(finding?.status == .pass)
         // Gatekeeper rejects it too: flagged, in the static check's words.
         let ps = CodeSignatureInfo(valid: false, notarized: false, error: "unsigned", gatekeeperAccepted: false,
                                    gatekeeperSource: "no usable signature")

@@ -24,10 +24,13 @@ public struct CodeSignatureInfo: Sendable, Equatable {
     /// Signed with a Developer ID certificate (for distribution). False for development certificates (Apple
     /// Development), which Gatekeeper never accepts on other Macs. Nil if not checked.
     public var developerID: Bool?
+    /// The strict static check's own result, recorded only when it differs from `valid`: false when the static check
+    /// rejected code that Gatekeeper accepts as notarized (then `valid` is true: macOS runs it).
+    public var staticValid: Bool?
 
     public init(valid: Bool, notarized: Bool?, appleSigned: Bool = false, adhoc: Bool = false, teamID: String? = nil,
                 identifier: String? = nil, error: String? = nil, gatekeeperAccepted: Bool? = nil, gatekeeperSource: String? = nil,
-                developerID: Bool? = nil) {
+                developerID: Bool? = nil, staticValid: Bool? = nil) {
         self.valid = valid
         self.notarized = notarized
         self.appleSigned = appleSigned
@@ -38,6 +41,7 @@ public struct CodeSignatureInfo: Sendable, Equatable {
         self.gatekeeperAccepted = gatekeeperAccepted
         self.gatekeeperSource = gatekeeperSource
         self.developerID = developerID
+        self.staticValid = staticValid
     }
 
     public var factValue: FactValue {
@@ -49,6 +53,7 @@ public struct CodeSignatureInfo: Sendable, Equatable {
         if let gatekeeperAccepted { o["gatekeeperAccepted"] = .bool(gatekeeperAccepted) }
         if let gatekeeperSource { o["gatekeeperSource"] = .string(gatekeeperSource) }
         if let developerID { o["developerID"] = .bool(developerID) }
+        if let staticValid { o["staticValid"] = .bool(staticValid) }
         o["source"] = .string(source)
         return .object(o)
     }
@@ -106,18 +111,26 @@ public struct SecurityFrameworkSignatures: CodeSignatureChecking {
         let strict = SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures | kSecCSDoNotValidateResources)
         let status = SecStaticCodeCheckValidityWithErrors(code, strict, nil, &cfError)
         guard status == errSecSuccess else {
+            // Take ownership first, so the error is released whichever message is used.
+            let error = cfError?.takeRetainedValue()
             // Security's own message for the status ("invalid Info.plist (plist or signature have been modified)") says
             // more than the CFError's generic description.
             let message = SecCopyErrorMessageString(status, nil) as String?
             let reason = status == errSecCSUnsigned ? "unsigned"
                 : message.map { "\($0) (\(status))" }
-                ?? (cfError?.takeRetainedValue()).map { CFErrorCopyDescription($0) as String } ?? "invalid (\(status))"
+                ?? error.map { CFErrorCopyDescription($0) as String } ?? "invalid (\(status))"
             var invalid = CodeSignatureInfo(valid: false, notarized: false, error: reason)
             // A second opinion: Gatekeeper's own assessment (it reads some signatures the strict static check rejects).
             if let (accepted, source) = assess(path) {
                 invalid.gatekeeperAccepted = accepted
                 invalid.gatekeeperSource = source
-                if accepted && source == "Notarized Developer ID" { invalid.notarized = true }
+                // Gatekeeper runs it as notarized code: that's what counts, for posture as for the inventory. The
+                // static check's verdict is kept, with its reason.
+                if accepted && source == "Notarized Developer ID" {
+                    invalid.valid = true
+                    invalid.notarized = true
+                    invalid.staticValid = false
+                }
             }
             return invalid
         }

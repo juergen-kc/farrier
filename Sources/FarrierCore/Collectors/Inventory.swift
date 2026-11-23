@@ -16,7 +16,9 @@ public struct InventoryCollector: Sendable {
     /// Folders scanned for apps: `*.app` in each, and in its sub-folders one level down (e.g. /Applications/Utilities).
     public let appFolders: [String]
     /// The real path behind symlinks, so an app linked under another name (Xcode.app → Xcode_26.6.app) is listed once.
-    public let resolve: @Sendable (String) -> String
+    /// Resolved one component at a time without touching privacy-protected folders; nil if it leads into one.
+    public let resolve: @Sendable (String) -> String?
+    public let isDirectory: @Sendable (String) -> Bool
 
     public init(runner: CommandRunning = ProcessRunner(),
                 readFile: @escaping @Sendable (String) -> Data? = { FileManager.default.contents(atPath: $0) },
@@ -24,7 +26,11 @@ public struct InventoryCollector: Sendable {
                 listDirectory: @escaping @Sendable (String) -> [String]? = { try? FileManager.default.contentsOfDirectory(atPath: $0) },
                 signatures: CodeSignatureChecking = SecurityFrameworkSignatures(),
                 appFolders: [String] = ["/Applications", FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path],
-                resolve: @escaping @Sendable (String) -> String = { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }) {
+                resolve: @escaping @Sendable (String) -> String? = { LaunchItemsCollector().resolvedOutsideProtectedFolders($0) },
+                isDirectory: @escaping @Sendable (String) -> Bool = { path in
+                    var dir: ObjCBool = false
+                    return FileManager.default.fileExists(atPath: path, isDirectory: &dir) && dir.boolValue
+                }) {
         self.runner = runner
         self.readFile = readFile
         self.fileExists = fileExists
@@ -32,6 +38,7 @@ public struct InventoryCollector: Sendable {
         self.signatures = signatures
         self.appFolders = appFolders
         self.resolve = resolve
+        self.isDirectory = isDirectory
     }
 
     public func collect() -> CollectionResult {
@@ -61,26 +68,49 @@ public struct InventoryCollector: Sendable {
     }
 
     /// `[{ name, bundleID, version, path, signature }]`, sorted by path. An app whose Info.plist can't be read is
-    /// still listed (with `error`), never dropped.
+    /// still listed (with `error`), never dropped. An app or folder that leads into a privacy-protected folder (a
+    /// symlink into Documents, a volume) is listed unchecked, never opened. No app folder at all: unavailable; one
+    /// that can't be listed: failed (or, for a sub-folder, named in the note), so a partial scan never looks complete.
     func collectApps() -> (FactValue?, CollectionNote) {
         let source = appFolders.joined(separator: ", ")
+        let roots = appFolders.filter(fileExists)
+        guard !roots.isEmpty else {
+            return (nil, CollectionNote(fact: Self.apps, status: .unavailable, source: source, detail: "no app folders"))
+        }
         var paths: [String] = []
-        for folder in appFolders where fileExists(folder) {
-            for name in listDirectory(folder) ?? [] where !name.hasPrefix(".") {
-                let path = "\(folder)/\(name)"
-                if name.hasSuffix(".app") {
-                    paths.append(path)
-                } else {
-                    for inner in listDirectory(path) ?? [] where inner.hasSuffix(".app") { paths.append("\(path)/\(inner)") }
-                }
+        var protected: [String] = []
+        var unlisted: [String] = []
+        for root in roots {
+            guard let real = resolve(root) else { protected.append(root); continue }
+            guard let names = listDirectory(real) else {
+                return (nil, CollectionNote(fact: Self.apps, status: .failed, source: source, detail: "cannot list \(root)"))
+            }
+            for name in names.sorted() where !name.hasPrefix(".") {
+                let path = "\(root)/\(name)"
+                if name.hasSuffix(".app") { paths.append(path); continue }
+                guard let target = resolve(path) else { continue }   // a link into a protected folder: not an app folder
+                guard isDirectory(target) else { continue }
+                guard let inner = listDirectory(target) else { unlisted.append(path); continue }
+                for app in inner.sorted() where app.hasSuffix(".app") { paths.append("\(path)/\(app)") }
             }
         }
         var seen = Set<String>()
-        paths = paths.map(resolve).filter { seen.insert($0).inserted }
+        var entries: [(path: String, real: String?)] = []
+        for path in paths {
+            let real = resolve(path)
+            if let real, !seen.insert(real).inserted { continue }
+            entries.append((real ?? path, real))
+        }
         var checked = 0
-        let items: [FactValue] = paths.sorted().map { path in
+        let items: [FactValue] = entries.sorted { $0.path < $1.path }.map { entry in
+            let path = entry.path
             let fallback = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
             var o: [String: FactValue] = ["path": .string(path)]
+            guard entry.real != nil else {
+                o["name"] = .string(fallback)
+                o["error"] = .string("in a privacy-protected folder (or reached through one); not checked")
+                return .object(o)
+            }
             if let data = readFile("\(path)/Contents/Info.plist"), let info = Parsers.propertyList(data)?.object {
                 o["name"] = .string(info["CFBundleDisplayName"]?.string ?? info["CFBundleName"]?.string ?? fallback)
                 if let id = info["CFBundleIdentifier"]?.string { o["bundleID"] = .string(id) }
@@ -95,8 +125,12 @@ public struct InventoryCollector: Sendable {
             }
             return .object(o)
         }
-        let detail = checked < items.count ? "\(items.count - checked) app(s) without a signature check on this platform" : nil
-        return (.array(items), CollectionNote(fact: Self.apps, status: .collected, source: source, detail: detail))
+        var details: [String] = []
+        if checked < items.count { details.append("\(items.count - checked) app(s) without a signature check") }
+        if !protected.isEmpty { details.append("not opened (privacy-protected): \(protected.joined(separator: ", "))") }
+        if !unlisted.isEmpty { details.append("cannot list \(unlisted.joined(separator: ", "))") }
+        return (.array(items), CollectionNote(fact: Self.apps, status: .collected, source: source,
+                                              detail: details.isEmpty ? nil : details.joined(separator: "; ")))
     }
 }
 
@@ -159,8 +193,8 @@ public enum Inventory {
     /// Apple's), or not checked at all. Other kinds of items are never flagged.
     public static func needsALook(_ item: FactValue) -> Bool {
         guard let o = item.object, o["path"] != nil || o["label"] != nil || o["plist"] != nil else { return false }
-        if o["error"] != nil && o["signature"] == nil { return true }
-        guard let sig = o["signature"]?.object else { return o["label"] != nil || o["plist"] != nil }
+        // An app or launch job whose signature wasn't checked can't be vouched for.
+        guard let sig = o["signature"]?.object else { return true }
         // Gatekeeper accepted it as notarized (or as Apple's): nothing to look at, whatever the static check said.
         if sig["gatekeeperAccepted"] == .bool(true),
            ["Notarized Developer ID", "Apple System", "Apple", "Mac App Store"].contains(sig["gatekeeperSource"]?.string ?? "") { return false }

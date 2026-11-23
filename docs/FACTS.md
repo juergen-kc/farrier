@@ -57,7 +57,7 @@ These take longer than the posture facts, so `farrier facts` and `farrier postur
 
 | Fact | Source | Values |
 |---|---|---|
-| `apps.installed` | `*.app` in `/Applications`, its sub-folders (e.g. Utilities) and `~/Applications`; `Contents/Info.plist`; the bundle's code signature (Security framework, as for launch jobs) | `[{ name, bundleID, version, path, signature, error }]`, sorted by path; an app whose Info.plist can't be read is listed with `error` |
+| `apps.installed` | `*.app` in `/Applications`, its sub-folders (e.g. Utilities) and `~/Applications`; `Contents/Info.plist`; the bundle's code signature (Security framework, as for launch jobs) | `[{ name, bundleID, version, path, signature, error }]`, sorted by path, symlinks resolved (each app once). An app whose Info.plist can't be read is listed with `error`; one reached through a privacy-protected folder (a link into Documents, a volume) is listed unchecked, never opened. No app folder: `unavailable`; `/Applications` unlistable: `failed`; a sub-folder unlistable: named in the note |
 | `system.extensions` | `/usr/bin/systemextensionsctl list` | `[{ category, teamID, bundleID, version, name, state, enabled, active }]`; the "N extension(s)" count must match the rows, or the fact is `unparsed` |
 | `accounts.admins` | `/usr/bin/dscl . -read /Groups/admin GroupMembership` | sorted member names |
 
@@ -65,7 +65,8 @@ These take longer than the posture facts, so `farrier facts` and `farrier postur
 are stapled or cached, and the strict static check rejects some script-based bundles. When they say "not
 notarized" or "invalid", Farrier asks Gatekeeper itself (`spctl --assess --type execute -vv`), which also looks tickets
 up online, and records `gatekeeperAccepted` and `gatekeeperSource` in the signature. Code Gatekeeper accepts as
-"Notarized Developer ID" counts as notarized. This applies to launch jobs too. On a CI runner, this changed Microsoft
+"Notarized Developer ID" counts as valid and notarized (macOS runs it); if the strict static check had rejected it,
+`staticValid: false` and its `error` are kept. This applies to launch jobs too. On a CI runner, this changed Microsoft
 Edge from "Unnotarized" and two IDLE apps from "Unsigned" to "Notarized Developer ID", matching `spctl`.
 
 The inventory also shows `launchd.items`, `mdm.profiles`, `tcc.grants` and `network.listeningTCP`. An app or launch job
