@@ -51,6 +51,20 @@ About `launchd.items`:
 - Only the executable and its signature are validated strictly, not every resource of an app bundle (which takes
   seconds for large apps).
 
+## Inventory facts (T0, collected only by `farrier inventory`)
+
+These take longer than the posture facts, so `farrier facts` and `farrier posture` don't collect them.
+
+| Fact | Source | Values |
+|---|---|---|
+| `apps.installed` | `*.app` in `/Applications`, its sub-folders (e.g. Utilities) and `~/Applications`; `Contents/Info.plist`; the bundle's code signature (Security framework, as for launch jobs) | `[{ name, bundleID, version, path, signature, error }]`, sorted by path; an app whose Info.plist can't be read is listed with `error` |
+| `system.extensions` | `/usr/bin/systemextensionsctl list` | `[{ category, teamID, bundleID, version, name, state, enabled, active }]`; the "N extension(s)" count must match the rows, or the fact is `unparsed` |
+| `accounts.admins` | `/usr/bin/dscl . -read /Groups/admin GroupMembership` | sorted member names |
+
+The inventory also shows `launchd.items`, `mdm.profiles`, `tcc.grants` and `network.listeningTCP`. An app or launch job
+"needs a look" (`!`, `flagged`) when its signature is invalid or missing, it isn't notarized (and isn't Apple's), or
+it couldn't be checked.
+
 ## T1: via the privileged helper
 
 Collected when `farrier` runs from `Farrier.app`, the helper is enabled (`farrier helper register`), and the

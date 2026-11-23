@@ -140,8 +140,11 @@ To do:
 - MCP: progress notifications for long calls; resources (`farrier://plan/{id}`, `farrier://journal/recent`); the
   other runbook prompts; validation with Claude Desktop
 - `posture.core` pack: about 25 high-value checks with mSCP mappings
-- `inventory` with signing and notarization status for launchd jobs, login items and extensions
-- `inventory` tools in the MCP server, and `--json` everywhere in the CLI
+- `inventory`: **written, not yet validated on the VM.** `farrier inventory` and the MCP `inventory` tool: installed
+  apps and launch jobs with signing and notarization status (flagged when they need a look), system extensions,
+  profiles, privacy grants, admins, listening ports. Still open: login items and background tasks (helper,
+  `sfltool dumpbtm`)
+- `--json` everywhere in the CLI
 - `--redact`
 
 ## v0.2: Cleanup

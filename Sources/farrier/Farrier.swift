@@ -13,7 +13,7 @@ struct Farrier: AsyncParsableCommand {
         abstract: "Keep your Mac sound: hygiene, posture, drift, patching and debugging.",
         discussion: "v0.1: rule packs, fact collection, posture evaluation, the privileged helper, and plan → approve → apply for the first fix (firewall). `farrier mcp` serves the same over MCP (stdio).",
         version: version,
-        subcommands: [Posture.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Undo.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self, Uninstall.self]
+        subcommands: [Posture.self, InventoryCommand.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Undo.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self, Uninstall.self]
     )
 }
 
@@ -181,6 +181,63 @@ struct Facts: ParsableCommand {
     }
 }
 
+
+// MARK: - farrier inventory
+
+struct InventoryCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "inventory",
+        abstract: "List what's on this Mac: apps, launch jobs, extensions, profiles, privacy grants, admins, ports.",
+        discussion: """
+        Read-only. Apps and launch jobs show their code signature; those that aren't validly signed and notarized are \
+        marked with !. Privacy grants need Full Disk Access for Farrier.app, profiles need the privileged helper; a \
+        section that can't be read says why.
+        """
+    )
+
+    @Option(name: .customLong("section"), help: "Only this section (repeatable): \(Inventory.sectionIDs.joined(separator: ", ")).")
+    var sections: [String] = []
+
+    @Flag(help: "Only the apps and launch jobs that need a look.")
+    var flagged = false
+
+    @Flag(help: "Output JSON.")
+    var json = false
+
+    func run() throws {
+        let report: InventoryReport
+        do {
+            report = try Operations.inventory(FarrierContext.live(actor: "cli"),
+                                              sections: sections.isEmpty ? nil : Set(sections), flaggedOnly: flagged)
+        } catch let error as OperationError {
+            note("\(error)")
+            throw ExitCode(2)
+        }
+        if json {
+            try Output.json(report)
+            return
+        }
+        for (n, section) in report.sections.enumerated() {
+            if n > 0 { print("") }
+            var header = "\(section.title)"
+            if section.available {
+                header += " (\(section.items.count)"
+                if section.flagged > 0 { header += ", \(section.flagged) need a look" }
+                header += ")"
+            }
+            print(header)
+            guard section.available else {
+                print("  — \(section.note ?? "not collected")")
+                continue
+            }
+            if section.items.isEmpty { print("  none") }
+            for item in section.items {
+                let mark = Inventory.needsALook(item) ? "!" : " "
+                print(" \(mark) \(Inventory.describe(item, section: section.id))")
+            }
+        }
+    }
+}
 
 // MARK: - farrier helper
 
