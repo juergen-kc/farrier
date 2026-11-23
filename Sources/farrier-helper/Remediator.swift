@@ -154,6 +154,10 @@ enum Remediator {
         }
         guard let before = read() else { return result(.failed, "could not read the \(name) state") }
         if before == "off" { return result(.alreadyCompliant, "\(name) is already off") }
+        // Only the exact state Farrier left: anything else (say, block all) is someone else's later change.
+        guard before == "on" else {
+            return result(.refused, "\(name) is \(before), not as Farrier left it (on); it was changed since, so it's not undone")
+        }
         guard item.observed.string == before else {
             return result(.refused, "the \(name) state changed since planning (\(item.observed) → \(before)); make a new plan")
         }
@@ -177,6 +181,11 @@ enum Remediator {
         if !managed.isEmpty { return result(.refused, "managed by a profile (\(managed.joined(separator: ", "))); change it there") }
         let changes = keys.filter { before[$0] != earlier[$0] }
         if changes.isEmpty { return result(.alreadyCompliant, "the settings are already as they were") }
+        // Only if both keys are still as Farrier left them (on): otherwise someone changed them since.
+        let changedSince = keys.filter { before[$0] != .bool(true) }
+        guard changedSince.isEmpty else {
+            return result(.refused, "\(changedSince.joined(separator: " and ")) changed since Farrier turned it on, so it's not undone")
+        }
         guard item.observed == .object(before) else {
             return result(.refused, "the software update settings changed since planning; make a new plan")
         }

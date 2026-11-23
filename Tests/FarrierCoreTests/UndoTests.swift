@@ -12,6 +12,8 @@ private func applied(_ plan: String, _ rule: String, _ action: String, previous:
 }
 
 private let facts = StaticFactStore(["firewall.globalState": .string("on"), "firewall.stealthMode": .string("on"),
+                                     "mdm.payloadTypes": .array([]), "mdm.declarationTypes": .array([]),
+                                     "mdm.managedPreferences": .object([:]),
                                      "softwareupdate.prefs": .object(["CriticalUpdateInstall": .bool(true), "ConfigDataInstall": .bool(true)])])
 
 @Suite("Undo")
@@ -49,6 +51,22 @@ struct UndoTests {
         let (again, why) = try Planner.planUndo(planID: planB, journal: journal, facts: facts, host: "H")
         #expect(again == nil)
         #expect(why.first?.reason.contains("itself an undo") == true)
+    }
+
+    @Test func managedOrUncheckableSettingsAreNotUndone() throws {
+        let journal = [applied(planA, "posture.core.firewall", "firewall.enable", previous: .string("off"))]
+        var f = facts.facts
+        f["mdm.payloadTypes"] = .array([.string("com.apple.security.firewall")])
+        let (managed, why) = try Planner.planUndo(planID: planA, journal: journal, facts: StaticFactStore(f), host: "H")
+        #expect(managed == nil)
+        #expect(why.first?.reason.contains("managed by com.apple.security.firewall") == true)
+        f["mdm.payloadTypes"] = .array([])
+        f["mdm.managedPreferences"] = .object(["com.apple.security.firewall": .array([.string("EnableFirewall")])])
+        #expect(try Planner.planUndo(planID: planA, journal: journal, facts: StaticFactStore(f), host: "H").plan == nil)
+        f.removeValue(forKey: "mdm.payloadTypes")   // no helper: can't tell
+        let (unknown, reason) = try Planner.planUndo(planID: planA, journal: journal, facts: StaticFactStore(f), host: "H")
+        #expect(unknown == nil)
+        #expect(reason.first?.reason.contains("could not be checked") == true)
     }
 
     @Test func undoParametersAreStrict() throws {

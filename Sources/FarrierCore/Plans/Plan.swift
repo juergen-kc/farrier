@@ -329,6 +329,35 @@ public enum Planner {
         let created = Int64(now.timeIntervalSince1970)
         return (Plan(id: id, createdAt: created, expiresAt: created + ttl, host: host, items: items), skipped)
     }
+
+    /// Why an action's setting mustn't be changed locally now (managed, or management can't be checked), from the
+    /// same inventories the posture engine uses; nil if it may be. The helper checks again before acting.
+    static func managementSkipReason(_ action: RemediationAction, _ facts: FactStore) -> String? {
+        func inventory(_ fact: String) -> Set<String>? {
+            guard let list = facts.value(for: fact)?.array else { return nil }
+            let strings = list.compactMap(\.string)
+            return strings.count == list.count ? Set(strings) : nil
+        }
+        let unknown = "whether MDM manages it could not be checked, so Farrier won't change it"
+        if !action.managedPayloadTypes.isEmpty {
+            guard let payloads = inventory(CoreFacts.profilePayloadTypes) else { return unknown }
+            if let type = action.managedPayloadTypes.first(where: payloads.contains) {
+                return "managed by \(type) now: change it in the profile or MDM"
+            }
+        }
+        if !action.managedDeclarationTypes.isEmpty {
+            guard let declarations = inventory(CoreFacts.declarationTypes) else { return unknown }
+            if let type = action.managedDeclarationTypes.first(where: declarations.contains) {
+                return "managed by \(type) now: change it in your MDM"
+            }
+        }
+        if let mp = action.managedPreference, let domain = mp.preference {
+            guard let prefs = PostureEngine.managedPreferences(facts) else { return unknown }
+            let set = (mp.keys ?? []).filter { prefs[domain]?.contains($0) ?? false }
+            if !set.isEmpty { return "managed preferences \(domain) (\(set.joined(separator: ", "))) now: change it in the profile" }
+        }
+        return nil
+    }
 }
 
 // MARK: - Exception plans
@@ -419,6 +448,10 @@ extension Planner {
             }
             guard record.previous != nil else {
                 skipped.append(PlanSkip(ruleID: ruleID, reason: "the journal has no earlier state for it (applied by an older Farrier)"))
+                continue
+            }
+            if let reason = managementSkipReason(undo, facts) {
+                skipped.append(PlanSkip(ruleID: ruleID, reason: reason))
                 continue
             }
             guard let observed = facts.value(for: undo.fact) else {
