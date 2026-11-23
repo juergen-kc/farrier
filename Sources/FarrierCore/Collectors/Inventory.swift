@@ -187,7 +187,9 @@ public enum Inventory {
             if let id = s("bundleID") { parts.append("(\(id))") }
             var line = parts.joined(separator: " ")
             if let signer { line += " — \(signer)" }
-            if let reason = sig?["error"]?.string, sig?["gatekeeperAccepted"] != .bool(true) { line += " (\(reason))" }
+            if let reason = sig?["error"]?.string, reason != "unsigned", sig?["gatekeeperAccepted"] != .bool(true) {
+                line += " (\(reason))"
+            }
             if let e = s("error") { line += " — \(e)" }
             return line
         case "launchItems":
