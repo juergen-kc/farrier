@@ -113,6 +113,16 @@ Done:
       `spctl --global-disable` can't be confirmed and Gatekeeper can't be turned off locally to test the fix; it needs
       a macOS 14 or 15 Mac. The helper reports success only if `spctl --status` reads back "enabled".
 
+- [x] Managed-device detection beyond profile payload types: managed preferences (`mdm.managedPreferences`, any
+      profile's keys, as a `managedBy: preference` selector, also checked by the helper before every fix), the
+      profiles by name (`mdm.profiles`, so a managed finding says which profile), the MDM server, and a one-line
+      management summary at the top of `farrier posture` and in `posture_check`. **Validated** on the macOS 27.2.1 VM
+      with a hand-installed profile (Custom Settings forcing `CriticalUpdateInstall` off, plus a firewall payload):
+      the summary read "not MDM-enrolled; 1 configuration profile(s); managed preferences for 2 domain(s)", the update
+      rule failed as managed by `com.apple.SoftwareUpdate (CriticalUpdateInstall)` and was left out of the plan, and the
+      profile came through with its name and organization. Still open: DDM declarations on enrolled Macs, per-user
+      managed preferences.
+
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
   Developer ID signing
@@ -123,7 +133,6 @@ To do:
   other runbook prompts; validation with Claude Desktop
 - Undo for T4 changes (record the previous state, plan the reverse change)
 - `posture.core` pack: about 25 high-value checks with mSCP mappings
-- Managed-device detection (`managed` findings are not fixable locally)
 - `inventory` with signing and notarization status for launchd jobs, login items and extensions
 - `inventory` tools in the MCP server, and `--json` everywhere in the CLI
 - `--redact`

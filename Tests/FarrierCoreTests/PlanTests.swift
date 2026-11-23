@@ -17,6 +17,7 @@ private func postureFacts(firewall: String = "off", payloadTypes: [String]? = []
         "firewall.globalState": .string(firewall),
         "softwareupdate.prefs": .object(["CriticalUpdateInstall": .bool(true), "ConfigDataInstall": .bool(true)]),
         "mdm.declarationTypes": .array([]),
+        "mdm.managedPreferences": .object([:]),
     ]
     if let payloadTypes { facts["mdm.payloadTypes"] = .array(payloadTypes.map { .string($0) }) }
     return StaticFactStore(facts)

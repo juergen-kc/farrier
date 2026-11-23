@@ -8,7 +8,7 @@ public enum HelperConstants {
     public static let machService = "dev.farrier.helper"       // launchd label and Mach service
     public static let daemonPlist = "dev.farrier.helper.plist" // Farrier.app/Contents/Library/LaunchDaemons/
     /// Bumped when the XPC protocol changes incompatibly.
-    public static let protocolVersion = 3
+    public static let protocolVersion = 4
     /// What the version handshake compares: the build version AND the protocol, so a protocol change restarts a
     /// running helper even when the version string stays the same (as it does between development builds).
     public static var handshakeVersion: String { "\(FarrierVersion.string)+p\(protocolVersion)" }
@@ -32,6 +32,9 @@ public func codeRequirement(identifier: String, teamID: String) -> String {
 public enum PrivilegedFact: String, CaseIterable, Sendable {
     /// Payload types of the computer-level configuration profiles (`profiles show` needs root).
     case mdmPayloadTypes = "mdm.payloadTypes"
+    /// The computer-level profiles, by identifier, name and organization, with their payload types and the MDM
+    /// server's host (`Parsers.profileSummaries`). No payload contents beyond that host.
+    case mdmProfiles = "mdm.profiles"
     /// TCP ports listening on non-loopback addresses (`netstat` as root). Since macOS 27, an unprivileged
     /// third-party process sees only its own sockets, so the CLI's own attempt comes back empty.
     case listeningTCP = "network.listeningTCP"
@@ -45,7 +48,7 @@ public enum PrivilegedFact: String, CaseIterable, Sendable {
     public var needsFullDiskAccess: Bool {
         switch self {
         case .tccGrants: return true
-        case .mdmPayloadTypes, .listeningTCP, .fullDiskAccess: return false
+        case .mdmPayloadTypes, .mdmProfiles, .listeningTCP, .fullDiskAccess: return false
         }
     }
 }

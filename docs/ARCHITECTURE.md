@@ -278,7 +278,8 @@ writable by others is ignored, so malware running as the user can't accept itsel
 tell; it reads the current state and reports `alreadyCompliant`, or refuses if the state differs from what the plan
 recorded; then it runs `socketfilterfw --setglobalstate on` and reports success only if reading the state back shows
 the firewall on. `gatekeeper.enable` works the same way with `spctl --global-enable` (or `--master-enable`) and
-`spctl --status`. `softwareupdate.enableSecurityAutoInstall` refuses unless the software update settings are exactly
+`spctl --status`. Every catalog action also names the managed-preference keys that would override it, and the
+helper refuses if a profile sets one (whatever payload put it there). `softwareupdate.enableSecurityAutoInstall` refuses unless the software update settings are exactly
 what the plan recorded, and on any MDM-enrolled Mac (a declaration could manage them, and declarations can't be read
 yet); it sets `CriticalUpdateInstall` and `ConfigDataInstall` with `defaults write` and checks each with `defaults
 read`. Every outcome goes to the helper's journal.

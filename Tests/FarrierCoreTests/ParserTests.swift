@@ -227,8 +227,9 @@ struct SystemCollectorTests {
 
     @Test func missingToolsAreUnavailable() {
         let result = SystemCollectors(runner: RecordedRunner([:]), readFile: { _ in nil }, fileExists: { _ in false }).collect()
-        #expect(result.facts.isEmpty)
-        #expect(result.notes.allSatisfy { $0.status == .unavailable })
+        // No /Library/Managed Preferences means no managed preferences: the one fact that's known without tools.
+        #expect(result.facts == ["mdm.managedPreferences": .object([:])])
+        #expect(result.notes.filter { $0.fact != "mdm.managedPreferences" }.allSatisfy { $0.status == .unavailable })
     }
 
     @Test func liveFactsDriveThePostureEngine() throws {

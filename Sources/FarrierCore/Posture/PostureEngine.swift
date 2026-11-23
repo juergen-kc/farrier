@@ -30,6 +30,10 @@ public enum CoreFacts {
     public static let declarationTypes = "mdm.declarationTypes"
     /// MDM enrollment state: { dep, mdm, userApproved }.
     public static let enrollment = "mdm.enrollment"
+    /// Computer-level managed preferences: { domain: [keys] }.
+    public static let managedPreferences = "mdm.managedPreferences"
+    /// Computer-level profiles: [{ identifier, displayName, organization?, payloadTypes, mdmServer? }].
+    public static let profiles = "mdm.profiles"
 }
 
 public struct Finding: Sendable, Codable, Hashable {
@@ -43,6 +47,8 @@ public struct Finding: Sendable, Codable, Hashable {
     /// True when an MDM profile or declaration enforces this setting. Farrier then reports it but never changes it.
     public let managed: Bool
     public let managedBy: String?
+    /// The profile(s) that carry `managedBy`'s payload, by name (and organization), when the profiles are known.
+    public let managedByProfile: String?
     /// True when the rule can be MDM-managed but the profile and declaration inventories weren't collected (or are
     /// malformed). Farrier then can't rule out that a profile owns the setting, so the finding isn't fixable.
     /// Note: a profile can be installed without MDM enrollment, so "not enrolled" doesn't settle it either.
@@ -82,6 +88,17 @@ public enum PostureEngine {
         }
         let payloads = inventory(CoreFacts.profilePayloadTypes)
         let declarations = inventory(CoreFacts.declarationTypes)
+        let preferences = managedPreferences(facts)
+        let profiles = facts.value(for: CoreFacts.profiles)?.array?.compactMap(\.object) ?? []
+
+        /// Which managed preference keys of `m` are set, or nil if `m` isn't a preference selector or none is.
+        func managedKeys(_ m: ManagedBy) -> [String]? {
+            // A domain with no settings (only profile bookkeeping, filtered out) manages nothing.
+            guard let domain = m.preference, let keys = preferences?[domain], !keys.isEmpty else { return nil }
+            guard let wanted = m.keys, !wanted.isEmpty else { return keys.sorted() }
+            let hit = wanted.filter(keys.contains)
+            return hit.isEmpty ? nil : hit
+        }
 
         var findings: [Finding] = []
         for pack in packs {
@@ -113,13 +130,28 @@ public enum PostureEngine {
                 let manager = rule.managedBy.first { m in
                     (m.payloadType.map { payloads?.contains($0) ?? false } ?? false)
                         || (m.declarationType.map { declarations?.contains($0) ?? false } ?? false)
+                        || managedKeys(m) != nil
                 }
-                let managedBy = manager.flatMap { $0.payloadType ?? $0.declarationType }
+                let managedBy = manager.flatMap { m -> String? in
+                    if let domain = m.preference { return "managed preferences \(domain) (\(managedKeys(m)!.joined(separator: ", ")))" }
+                    return m.payloadType ?? m.declarationType
+                }
+                let managedByProfile = manager?.payloadType.flatMap { type -> String? in
+                    let names = profiles
+                        .filter { $0["payloadTypes"]?.array?.contains(.string(type)) ?? false }
+                        .map { p -> String in
+                            let name = p["displayName"]?.string ?? p["identifier"]?.string ?? "?"
+                            return p["organization"]?.string.map { "\(name) (\($0))" } ?? name
+                        }
+                    return names.isEmpty ? nil : names.joined(separator: "; ")
+                }
                 // Only rules that MDM can manage need the inventories. Each selector type needs its own inventory.
                 let needsPayloads = rule.managedBy.contains { $0.payloadType != nil }
                 let needsDeclarations = rule.managedBy.contains { $0.declarationType != nil }
+                let needsPreferences = rule.managedBy.contains { $0.preference != nil }
                 let managementUnknown = managedBy == nil
-                    && ((needsPayloads && payloads == nil) || (needsDeclarations && declarations == nil))
+                    && ((needsPayloads && payloads == nil) || (needsDeclarations && declarations == nil)
+                        || (needsPreferences && preferences == nil))
 
                 let (status, reason): (Finding.Status, String?) = {
                     switch outcome {
@@ -130,7 +162,8 @@ public enum PostureEngine {
                 }()
                 findings.append(Finding(
                     ruleID: rule.id, title: rule.title, severity: rule.severity, status: status, reason: reason,
-                    managed: managedBy != nil, managedBy: managedBy, managementUnknown: managementUnknown,
+                    managed: managedBy != nil, managedBy: managedBy, managedByProfile: managedByProfile,
+                    managementUnknown: managementUnknown,
                     fixable: status == .fail && rule.remediation.automatic && managedBy == nil && !managementUnknown,
                     guidance: status == .pass ? nil : rule.remediation.guidance,
                     mappings: rule.mappings,
@@ -146,5 +179,71 @@ public enum PostureEngine {
             return $0.ruleID < $1.ruleID
         }
         return PostureReport(findings: findings)
+    }
+
+    /// `mdm.managedPreferences` if it's a valid `{ domain: [keys] }`; missing or malformed is nil (unknown).
+    static func managedPreferences(_ facts: FactStore) -> [String: Set<String>]? {
+        guard let object = facts.value(for: CoreFacts.managedPreferences)?.object else { return nil }
+        var result: [String: Set<String>] = [:]
+        for (domain, keys) in object {
+            guard let list = keys.array else { return nil }
+            let strings = list.compactMap(\.string)
+            guard strings.count == list.count else { return nil }
+            result[domain] = Set(strings)
+        }
+        return result
+    }
+}
+
+/// How this Mac is managed, for the top of a posture report. Every part is nil when its fact wasn't collected.
+public struct ManagementSummary: Sendable, Codable, Equatable {
+    public let mdmEnrolled: Bool?
+    public let enrolledViaDEP: Bool?
+    public let userApproved: Bool?
+    /// The MDM server's host, from the enrollment profile.
+    public let mdmServer: String?
+    /// Computer-level profiles, by name (and organization).
+    public let profiles: [String]?
+    /// Preference domains a profile manages.
+    public let managedPreferenceDomains: [String]?
+
+    public init(facts: FactStore) {
+        func bool(_ key: String) -> Bool? {
+            if case .bool(let b)? = facts.value(for: CoreFacts.enrollment)?.object?[key] { return b }
+            return nil
+        }
+        mdmEnrolled = bool("mdm")
+        enrolledViaDEP = bool("dep")
+        userApproved = bool("userApproved")
+        let list = facts.value(for: CoreFacts.profiles)?.array?.compactMap(\.object)
+        mdmServer = list?.compactMap { $0["mdmServer"]?.string }.first
+        profiles = list?.map { p in
+            let name = p["displayName"]?.string ?? p["identifier"]?.string ?? "?"
+            return p["organization"]?.string.map { "\(name) (\($0))" } ?? name
+        }
+        managedPreferenceDomains = PostureEngine.managedPreferences(facts).map { $0.keys.sorted() }
+    }
+
+    /// One line, e.g. "MDM-enrolled (Automated Device Enrollment) with mdm.example.com; 3 profiles".
+    public var description: String {
+        var parts: [String] = []
+        switch mdmEnrolled {
+        case true?:
+            var e = "MDM-enrolled"
+            if enrolledViaDEP == true { e += " (Automated Device Enrollment)" } else if userApproved == true { e += " (user approved)" }
+            if let mdmServer { e += " with \(mdmServer)" }
+            parts.append(e)
+        case false?: parts.append("not MDM-enrolled")
+        case nil: parts.append("MDM enrollment unknown")
+        }
+        if let profiles {
+            parts.append(profiles.isEmpty ? "no configuration profiles" : "\(profiles.count) configuration profile(s)")
+        } else {
+            parts.append("configuration profiles not checked (needs the helper)")
+        }
+        if let domains = managedPreferenceDomains, !domains.isEmpty {
+            parts.append("managed preferences for \(domains.count) domain(s)")
+        }
+        return parts.joined(separator: "; ")
     }
 }

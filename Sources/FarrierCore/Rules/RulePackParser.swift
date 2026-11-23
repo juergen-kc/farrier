@@ -39,7 +39,7 @@ public enum RulePackParser {
     static let targetKeys: Set<String> = ["path", "fact", "type", "contains"]
     static let whenKeys: Set<String> = ["processNotRunning", "appInstalled", "appNotInstalled"]
     static let remediationKeys: Set<String> = ["automatic", "action", "guidance"]
-    static let managedByKeys: Set<String> = ["payloadType", "declarationType"]
+    static let managedByKeys: Set<String> = ["payloadType", "declarationType", "preference", "keys"]
 
     public static func parse(file url: URL, source: RulePack.Source) -> Result {
         do {
@@ -197,9 +197,22 @@ public enum RulePackParser {
                 for item in list {
                     guard let o = item.object else { ctx.error("`managedBy` entries must be mappings"); continue }
                     ctx.unknownKeys(o, allowed: managedByKeys, prefix: "managedBy.")
-                    let entry = ManagedBy(payloadType: o["payloadType"]?.string, declarationType: o["declarationType"]?.string)
-                    if (entry.payloadType == nil) == (entry.declarationType == nil) {
-                        ctx.error("each `managedBy` entry needs exactly one of `payloadType` or `declarationType`")
+                    var keys: [String]?
+                    if let k = o["keys"] {
+                        let strings = k.array?.compactMap(\.string) ?? []
+                        if k.array == nil || strings.count != k.array!.count || strings.contains(where: \.isEmpty) {
+                            ctx.error("`managedBy.keys` must be a list of key names")
+                        } else {
+                            keys = strings
+                        }
+                    }
+                    let entry = ManagedBy(payloadType: o["payloadType"]?.string, declarationType: o["declarationType"]?.string,
+                                          preference: o["preference"]?.string, keys: keys)
+                    if [entry.payloadType, entry.declarationType, entry.preference].compactMap({ $0 }).count != 1 {
+                        ctx.error("each `managedBy` entry needs exactly one of `payloadType`, `declarationType` or `preference`")
+                    }
+                    if keys != nil && entry.preference == nil {
+                        ctx.error("`managedBy.keys` only goes with `preference`")
                     }
                     managedBy.append(entry)
                 }

@@ -75,8 +75,9 @@ rules:
       fact: filevault.status        # provided by a FarrierCore collector
     expect:
       equals: "On"
-    managedBy:                      # MDM payloads that can enforce this setting
+    managedBy:                      # what can enforce this setting (MDM payloads, managed preferences)
       - payloadType: com.apple.MCX.FileVault2
+      - { preference: com.apple.MCX, keys: [dontAllowFDEDisable] }
     remediation:
       automatic: false              # enabling FileVault involves recovery-key handling
       guidance: >
@@ -95,7 +96,7 @@ rules:
 | `severity` | yes | `info` \| `low` \| `medium` \| `high` \| `critical` |
 | `collect.fact` | yes | A fact ID from a collector. Only bundled collectors exist, so rules can't run commands. |
 | `expect` | yes | `equals`, `notEquals`, `in`, `matches`, `lt`/`gt`, `exists`, `all`/`any` (nested). `path` selects a key inside a structured fact, and `each` applies a condition to every element of a list. |
-| `managedBy` | no | `payloadType` (configuration profiles) or `declarationType` (Declarative Device Management). If one is present, the finding is `managed` and is not fixable locally. |
+| `managedBy` | no | Each entry is one of `payloadType` (configuration profiles), `declarationType` (Declarative Device Management), or `preference` (a managed preference domain, with optional `keys`: any profile can set those, e.g. with Custom Settings, and they override local settings). If one is present, the finding is `managed` (with the profile's name when it's known) and is not fixable locally. If what an entry needs can't be read, the finding is `managementUnknown` and not fixable either. |
 | `remediation.automatic` | yes | `true` requires `remediation.action`, which names an allowlisted helper setting (T4) |
 | `mappings` | no | Benchmark IDs (mSCP, CIS, NIST 800-53) |
 

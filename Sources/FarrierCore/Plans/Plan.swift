@@ -141,6 +141,9 @@ public struct RemediationAction: Sendable, Equatable {
     /// Declaration types (Declarative Device Management) that can own the setting. Declarations can't be read yet,
     /// so the helper refuses these actions on any MDM-enrolled Mac (only MDM can deliver declarations).
     public let managedDeclarationTypes: [String]
+    /// Managed preference keys that override the setting (any profile can set them, e.g. Custom Settings): the
+    /// helper refuses when one is set.
+    public let managedPreference: ManagedBy?
     public let summary: String
     /// Exceptions carry their scope as parameters; everything else is fully described by the action.
     public var takesParameters: Bool { id.hasPrefix("exception.") }
@@ -150,28 +153,31 @@ public enum RemediationCatalog {
     public static let firewallEnable = RemediationAction(
         id: "firewall.enable", tier: .t4, fact: "firewall.globalState", compliantValues: ["on", "blockAll"],
         managedPayloadTypes: ["com.apple.security.firewall"], managedDeclarationTypes: [],
+        managedPreference: ManagedBy(preference: "com.apple.security.firewall", keys: ["EnableFirewall"]),
         summary: "Turn on the application firewall"
     )
 
     public static let firewallStealthEnable = RemediationAction(
         id: "firewall.stealthEnable", tier: .t4, fact: "firewall.stealthMode", compliantValues: ["on"],
         managedPayloadTypes: ["com.apple.security.firewall"], managedDeclarationTypes: [],
+        managedPreference: ManagedBy(preference: "com.apple.security.firewall", keys: ["EnableStealthMode"]),
         summary: "Turn on the firewall's stealth mode (no replies to pings and probes)"
     )
 
     /// Accepting or withdrawing an exception changes what posture reports, so it's approved like a system setting.
     public static let exceptionAdd = RemediationAction(
         id: "exception.add", tier: .t4, fact: "launchd.items", compliantValues: [], managedPayloadTypes: [],
-        managedDeclarationTypes: [], summary: "Add a posture exception"
+        managedDeclarationTypes: [], managedPreference: nil, summary: "Add a posture exception"
     )
     public static let exceptionRemove = RemediationAction(
         id: "exception.remove", tier: .t4, fact: "launchd.items", compliantValues: [], managedPayloadTypes: [],
-        managedDeclarationTypes: [], summary: "Remove a posture exception"
+        managedDeclarationTypes: [], managedPreference: nil, summary: "Remove a posture exception"
     )
 
     public static let gatekeeperEnable = RemediationAction(
         id: "gatekeeper.enable", tier: .t4, fact: "gatekeeper.assessments", compliantValues: ["enabled"],
         managedPayloadTypes: ["com.apple.systempolicy.control"], managedDeclarationTypes: [],
+        managedPreference: ManagedBy(preference: "com.apple.systempolicy.control", keys: ["EnableAssessment"]),
         summary: "Turn on Gatekeeper (only run apps from the App Store and identified developers)"
     )
 
@@ -180,6 +186,7 @@ public enum RemediationCatalog {
         id: "softwareupdate.enableSecurityAutoInstall", tier: .t4, fact: "softwareupdate.prefs", compliantValues: [],
         managedPayloadTypes: ["com.apple.SoftwareUpdate"],
         managedDeclarationTypes: ["com.apple.configuration.softwareupdate.settings"],
+        managedPreference: ManagedBy(preference: "com.apple.SoftwareUpdate", keys: ["CriticalUpdateInstall", "ConfigDataInstall"]),
         summary: "Install Security Responses and system data files automatically"
     )
     /// The keys `securityAutoInstall` sets to true.
@@ -240,7 +247,13 @@ public enum Planner {
             guard finding.fixable else {
                 let reason: String
                 if finding.managed {
-                    reason = "managed by \(finding.managedBy ?? "MDM"): change it in your MDM"
+                    let profile = finding.managedByProfile.map { ", profile \($0)" } ?? ""
+                    // A Mac that isn't MDM-enrolled can still have profiles installed by hand.
+                    let enrolled = facts.value(for: CoreFacts.enrollment)?.object?["mdm"]
+                    let where_ = enrolled == .bool(false)
+                        ? "change or remove the profile (System Settings → General → Device Management)"
+                        : "change it in your MDM"
+                    reason = "managed by \(finding.managedBy ?? "MDM")\(profile): \(where_)"
                 } else if finding.managementUnknown {
                     reason = "whether MDM manages it could not be checked (profiles need the privileged helper; declarations "
                         + "can't be read on an MDM-enrolled Mac yet), so Farrier won't change it"

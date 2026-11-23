@@ -135,6 +135,43 @@ public enum Parsers {
         return .array(types.sorted().map(FactValue.string))
     }
 
+    /// The same output → the computer-level profiles: `[{ identifier, displayName, organization, payloadTypes,
+    /// mdmServer }]`, sorted by identifier. `organization` and `mdmServer` (the host of the MDM payload's ServerURL,
+    /// only on the enrollment profile) are left out when absent. As strict as `profilePayloadTypes`.
+    public static func profileSummaries(_ output: Data) -> FactValue? {
+        let text = String(decoding: output, as: UTF8.self)
+        guard let start = text.range(of: "<?xml") ?? text.range(of: "<plist") else {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed == "There are no configuration profiles installed" ? .array([]) : nil
+        }
+        guard let root = propertyList(Data(text[start.lowerBound...].utf8))?.object else { return nil }
+        guard let profiles = root["_computerlevel"] else { return .array([]) }
+        guard let list = profiles.array else { return nil }
+        var summaries: [(String, FactValue)] = []
+        for profile in list {
+            guard let p = profile.object, let identifier = p["ProfileIdentifier"]?.string, !identifier.isEmpty,
+                  let items = p["ProfileItems"]?.array else { return nil }
+            var types = Set<String>()
+            var server: String?
+            for item in items {
+                guard let t = item.object?["PayloadType"]?.string, !t.isEmpty else { return nil }
+                types.insert(t)
+                if t == "com.apple.mdm", let url = item.object?["PayloadContent"]?.object?["ServerURL"]?.string {
+                    server = URL(string: url)?.host
+                }
+            }
+            var o: [String: FactValue] = [
+                "identifier": .string(identifier),
+                "displayName": .string(p["ProfileDisplayName"]?.string ?? identifier),
+                "payloadTypes": .array(types.sorted().map(FactValue.string)),
+            ]
+            if let org = p["ProfileOrganization"]?.string, !org.isEmpty { o["organization"] = .string(org) }
+            if let server { o["mdmServer"] = .string(server) }
+            summaries.append((identifier, .object(o)))
+        }
+        return .array(summaries.sorted { $0.0 < $1.0 }.map(\.1))
+    }
+
     /// A property list (XML or binary) → object. Dates become ISO 8601 strings, data becomes base64.
     public static func propertyList(_ data: Data) -> FactValue? {
         guard let value = try? PropertyListDecoder().decode(FactValue.self, from: data), value.object != nil else { return nil }

@@ -24,5 +24,6 @@
     }
   ],
   "mdm.payloadTypes": [],
-  "mdm.declarationTypes": ["com.apple.configuration.softwareupdate.settings"]
+  "mdm.declarationTypes": ["com.apple.configuration.softwareupdate.settings"],
+  "mdm.managedPreferences": {}
 }

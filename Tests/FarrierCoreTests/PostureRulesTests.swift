@@ -106,7 +106,8 @@ struct PostureRulesTests {
     }
 
     @Test func stealthModeIsFixableUnlessManaged() throws {
-        var facts: [String: FactValue] = ["firewall.stealthMode": .string("off"), "mdm.payloadTypes": .array([])]
+        var facts: [String: FactValue] = ["firewall.stealthMode": .string("off"), "mdm.payloadTypes": .array([]),
+                                          "mdm.managedPreferences": .object([:])]
         let off = try finding("posture.core.firewall-stealth", facts)
         #expect(off.status == .fail)
         #expect(off.fixable)
@@ -117,7 +118,7 @@ struct PostureRulesTests {
 
     @Test func stealthModeIsPlannedThroughTheCatalog() throws {
         let facts = StaticFactStore(["firewall.stealthMode": .string("off"), "mdm.payloadTypes": .array([]),
-                                     "mdm.declarationTypes": .array([])])
+                                     "mdm.declarationTypes": .array([]), "mdm.managedPreferences": .object([:])])
         let packs = try packs()
         let report = PostureEngine.evaluate(packs, facts: facts)
         let (plan, _) = Planner.plan(report: report, packs: packs, facts: facts, ruleIDs: ["posture.core.firewall-stealth"],

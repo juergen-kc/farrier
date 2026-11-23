@@ -57,6 +57,7 @@ struct PostureEngineTests {
         // With valid, empty inventories the firewall is fixable.
         let report = PostureEngine.evaluate(packs, facts: StaticFactStore([
             "firewall.globalState": .string("off"), "mdm.payloadTypes": .array([]), "mdm.declarationTypes": .array([]),
+            "mdm.managedPreferences": .object([:]),
         ]))
         let firewall = try finding(report, "posture.core.firewall")
         #expect(!firewall.managementUnknown)

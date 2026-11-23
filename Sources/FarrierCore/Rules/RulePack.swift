@@ -54,9 +54,21 @@ public enum Tier: String, Sendable, Codable, CaseIterable {
     case t0 = "T0", t1 = "T1", t2 = "T2", t3 = "T3", t4 = "T4"
 }
 
+/// What can enforce a rule's setting: a configuration profile payload, a DDM declaration, or managed preferences
+/// (a preference domain, optionally only some of its keys, that any profile can set, e.g. with Custom Settings).
 public struct ManagedBy: Sendable, Hashable, Codable {
     public let payloadType: String?
     public let declarationType: String?
+    public let preference: String?
+    /// With `preference`: only these keys count; nil or empty means any key of the domain.
+    public let keys: [String]?
+
+    public init(payloadType: String? = nil, declarationType: String? = nil, preference: String? = nil, keys: [String]? = nil) {
+        self.payloadType = payloadType
+        self.declarationType = declarationType
+        self.preference = preference
+        self.keys = keys
+    }
 }
 
 public struct Remediation: Sendable, Hashable, Codable {
