@@ -183,7 +183,9 @@ public struct SystemCollectors: Sendable {
                 notes.append(CollectionNote(fact: fact, status: .failed, source: dir, detail: problem ?? "cannot read \(name)"))
                 return
             }
-            domains[String(name.dropLast(".plist".count))] = .array(object.keys.sorted().map(FactValue.string))
+            // Profile bookkeeping (PayloadUUID, _manualProfile, …) isn't a setting.
+            let keys = object.keys.filter { !$0.hasPrefix("_") && !$0.hasPrefix("Payload") }
+            domains[String(name.dropLast(".plist".count))] = .array(keys.sorted().map(FactValue.string))
         }
         facts[fact] = .object(domains)
         notes.append(CollectionNote(fact: fact, status: .collected, source: dir, detail: nil))

@@ -60,7 +60,7 @@ struct ManagedDeviceTests {
         let dir = "/Library/Managed Preferences"
         let files: [String: Data] = [
             "\(dir)/com.apple.SoftwareUpdate.plist": plist(["CriticalUpdateInstall": false, "AutomaticCheckEnabled": true]),
-            "\(dir)/com.apple.security.firewall.plist": plist(["EnableFirewall": true]),
+            "\(dir)/com.apple.security.firewall.plist": plist(["EnableFirewall": true, "PayloadUUID": "X", "_manualProfile": true]),
         ]
         func collector(_ files: [String: Data], dirExists: Bool = true) -> SystemCollectors {
             SystemCollectors(runner: RecordedRunner([:]), readFile: { files[$0] },
@@ -114,6 +114,13 @@ struct ManagedDeviceTests {
                                            ruleIDs: ["posture.core.firewall"], host: "H")
         #expect(plan == nil)
         #expect(skipped.first?.reason.contains("profile Security Baseline") == true)
+        #expect(skipped.first?.reason.contains("change it in your MDM") == true)  // enrollment unknown
+        // Not enrolled: the profile was installed by hand, so that's where it's changed.
+        facts["mdm.enrollment"] = .object(["dep": .bool(false), "mdm": .bool(false), "userApproved": .bool(false)])
+        let local = StaticFactStore(facts)
+        let (_, localSkips) = Planner.plan(report: PostureEngine.evaluate(packs, facts: local), packs: packs, facts: local,
+                                           ruleIDs: ["posture.core.firewall"], host: "H")
+        #expect(localSkips.first?.reason.contains("Device Management") == true)
     }
 
     @Test func managementSummary() throws {

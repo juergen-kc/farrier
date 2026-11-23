@@ -248,7 +248,12 @@ public enum Planner {
                 let reason: String
                 if finding.managed {
                     let profile = finding.managedByProfile.map { ", profile \($0)" } ?? ""
-                    reason = "managed by \(finding.managedBy ?? "MDM")\(profile): change it in your MDM"
+                    // A Mac that isn't MDM-enrolled can still have profiles installed by hand.
+                    let enrolled = facts.value(for: CoreFacts.enrollment)?.object?["mdm"]
+                    let where_ = enrolled == .bool(false)
+                        ? "change or remove the profile (System Settings → General → Device Management)"
+                        : "change it in your MDM"
+                    reason = "managed by \(finding.managedBy ?? "MDM")\(profile): \(where_)"
                 } else if finding.managementUnknown {
                     reason = "whether MDM manages it could not be checked (profiles need the privileged helper; declarations "
                         + "can't be read on an MDM-enrolled Mac yet), so Farrier won't change it"
