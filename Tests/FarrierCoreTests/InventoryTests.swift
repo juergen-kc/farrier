@@ -99,6 +99,23 @@ struct InventoryTests {
         #expect(flagged.sections.first?.items.count == 1)
     }
 
+    @Test func gatekeepersVerdictWins() {
+        // Offline the ticket isn't found, but Gatekeeper (online) says notarized: shown in its words, not flagged.
+        let edge = CodeSignatureInfo(valid: true, notarized: true, teamID: "UBF8T346G9", gatekeeperAccepted: true,
+                                     gatekeeperSource: "Notarized Developer ID")
+        #expect(edge.source == "Notarized Developer ID")
+        #expect(!Inventory.needsALook(.object(["path": .string("/Applications/Microsoft Edge.app"), "signature": edge.factValue])))
+        // The strict static check rejects a script-based bundle that Gatekeeper accepts.
+        let idle = CodeSignatureInfo(valid: false, notarized: true, error: "unsigned", gatekeeperAccepted: true,
+                                     gatekeeperSource: "Notarized Developer ID")
+        #expect(!Inventory.needsALook(.object(["path": .string("/Applications/Python 3.11/IDLE.app"), "signature": idle.factValue])))
+        // Gatekeeper rejects it too: flagged, in the static check's words.
+        let ps = CodeSignatureInfo(valid: false, notarized: false, error: "unsigned", gatekeeperAccepted: false,
+                                   gatekeeperSource: "no usable signature")
+        #expect(ps.source == "Unsigned")
+        #expect(Inventory.needsALook(.object(["path": .string("/Applications/PowerShell.app"), "signature": ps.factValue])))
+    }
+
     @Test func mcpToolReturnsTheReport() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("farrier-inv-\(UUID().uuidString)")
         var ctx = FarrierContext(

@@ -161,6 +161,9 @@ public enum Inventory {
         guard let o = item.object, o["path"] != nil || o["label"] != nil || o["plist"] != nil else { return false }
         if o["error"] != nil && o["signature"] == nil { return true }
         guard let sig = o["signature"]?.object else { return o["label"] != nil || o["plist"] != nil }
+        // Gatekeeper accepted it as notarized (or as Apple's): nothing to look at, whatever the static check said.
+        if sig["gatekeeperAccepted"] == .bool(true),
+           ["Notarized Developer ID", "Apple System", "Apple", "Mac App Store"].contains(sig["gatekeeperSource"]?.string ?? "") { return false }
         if sig["valid"] != .bool(true) { return true }
         if sig["appleSigned"] == .bool(true) { return false }
         return sig["notarized"] != .bool(true)
