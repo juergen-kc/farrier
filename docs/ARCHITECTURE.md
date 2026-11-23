@@ -284,6 +284,16 @@ what the plan recorded, and on any MDM-enrolled Mac (a declaration could manage 
 yet); it sets `CriticalUpdateInstall` and `ConfigDataInstall` with `defaults write` and checks each with `defaults
 read`. Every outcome goes to the helper's journal.
 
+**Undo.** When the helper applies a change that can be undone, its journal entry records `previous`: the state the
+change replaced, which the helper had just confirmed matched the plan's `observed`. `farrier undo <plan>` (MCP
+`plan_undo`) reads the helper's journal (world-readable, root-owned) and plans the reverse catalog action for each
+such change (`firewall.restore`, `firewall.stealthRestore`, `softwareupdate.restoreSecurityAutoInstall`), with one
+parameter, `reverts`: the plan id. It's a T4 plan, approved like any other. The helper carries out an undo action only
+if its own journal shows that plan applied the forward action for that rule, with a recorded earlier state, and no
+undo of it was applied yet; it restores the state **from its journal**, never from the plan, and refuses if the
+setting is no longer as Farrier left it. So undo actions can't be used to weaken a setting Farrier didn't change.
+Gatekeeper and exceptions have no undo (exceptions are withdrawn with `farrier exceptions remove`).
+
 **Console-session check (required, verified).** The helper accepts approval-related calls (`beginApproval`,
 `applyPlan`, enrollment, revocation) only from the user session at the screen. For each call:
 1. Take the caller's audit session ID from the XPC connection (`NSXPCConnection.auditSessionIdentifier`).

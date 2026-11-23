@@ -49,6 +49,10 @@ enum Remediator {
             }
         }
 
+        if let forward = action.reverses {
+            return undo(item, action, forward: forward, runner, result)
+        }
+
         switch action.id {
         case RemediationCatalog.gatekeeperEnable.id:
             return setGatekeeper(item, action, runner, result)
@@ -103,6 +107,96 @@ enum Remediator {
         }
         let scope = "team \(p.teamID)" + (p.identifier.map { " (\($0))" } ?? "")
         return result(.applied, adding ? "accepted \(scope) for \(item.ruleID)" : "removed the exception for \(scope)")
+    }
+
+    // MARK: Undo
+
+    /// Reverses a change only if the helper's own journal shows that plan applied it, with the state it replaced,
+    /// and it hasn't been undone already. The target state comes from the journal (root-owned), never the plan.
+    private static func undo(_ item: PlanItem, _ action: RemediationAction, forward: String, _ runner: CommandRunning,
+                             _ result: (ItemResult.Outcome, String?) -> ItemResult) -> ItemResult {
+        let planID: String
+        do { planID = try UndoRules.validate(item.parameters) } catch { return result(.refused, "\(error)") }
+        let history: [JournalRecord]
+        do { history = try HelperService.journal.entries().map(\.record) } catch {
+            return result(.refused, "can't read the helper's journal: \(error)")
+        }
+        guard let applied = history.last(where: { $0.planID == planID && $0.ruleID == item.ruleID && $0.action == forward
+                                                 && $0.outcome == "applied" }),
+              let previous = applied.previous else {
+            return result(.refused, "the helper's journal shows no change by plan \(planID.prefix(8)) to undo here")
+        }
+        if history.contains(where: { $0.reverts == planID && $0.ruleID == item.ruleID && $0.action == action.id && $0.outcome == "applied" }) {
+            return result(.alreadyCompliant, "plan \(planID.prefix(8)) was already undone")
+        }
+        switch action.id {
+        case RemediationCatalog.firewallRestore.id:
+            return restoreFirewall(item, previous, runner, result, name: "firewall", get: "--getglobalstate",
+                                   set: "--setglobalstate", parse: Parsers.firewallGlobalState)
+        case RemediationCatalog.firewallStealthRestore.id:
+            return restoreFirewall(item, previous, runner, result, name: "stealth mode", get: "--getstealthmode",
+                                   set: "--setstealthmode", parse: Parsers.firewallStealthMode)
+        case RemediationCatalog.securityAutoInstallRestore.id:
+            return restoreSecurityAutoInstall(item, previous, runner, result)
+        default:
+            return result(.refused, "no implementation for \(action.id)")
+        }
+    }
+
+    /// Puts a firewall setting back to `previous` ("off": the forward action only ever turned it on from off).
+    private static func restoreFirewall(_ item: PlanItem, _ previous: FactValue, _ runner: CommandRunning,
+                                        _ result: (ItemResult.Outcome, String?) -> ItemResult,
+                                        name: String, get: String, set: String, parse: (String) -> FactValue?) -> ItemResult {
+        guard previous == .string("off") else { return result(.refused, "the recorded earlier \(name) state (\(previous)) can't be restored") }
+        func read() -> String? {
+            guard let r = runner.run(socketfilterfw, [get], timeout: 15), !r.timedOut else { return nil }
+            return parse(r.combined)?.string
+        }
+        guard let before = read() else { return result(.failed, "could not read the \(name) state") }
+        if before == "off" { return result(.alreadyCompliant, "\(name) is already off") }
+        guard item.observed.string == before else {
+            return result(.refused, "the \(name) state changed since planning (\(item.observed) → \(before)); make a new plan")
+        }
+        guard let r = runner.run(socketfilterfw, [set, "off"], timeout: 30) else { return result(.failed, "\(socketfilterfw) not found") }
+        if r.timedOut { return result(.failed, "socketfilterfw timed out") }
+        guard let after = read() else { return result(.failed, "could not read the \(name) state afterwards") }
+        guard after == "off" else { return result(.failed, "\(name) is still \(after) (exit \(r.status))") }
+        return result(.applied, "\(name) \(before) → off (restored)")
+    }
+
+    /// Puts the security auto-install keys back as they were: the earlier value, or not set at all.
+    private static func restoreSecurityAutoInstall(_ item: PlanItem, _ previous: FactValue, _ runner: CommandRunning,
+                                                   _ result: (ItemResult.Outcome, String?) -> ItemResult) -> ItemResult {
+        guard let earlier = previous.object else { return result(.refused, "the recorded earlier settings can't be read") }
+        let keys = RemediationCatalog.securityAutoInstallKeys
+        let collector = SystemCollectors(runner: runner)
+        guard let (before, managedKeys) = collector.softwareUpdateSettings() else {
+            return result(.failed, "could not read the software update settings")
+        }
+        let managed = keys.filter(managedKeys.contains)
+        if !managed.isEmpty { return result(.refused, "managed by a profile (\(managed.joined(separator: ", "))); change it there") }
+        let changes = keys.filter { before[$0] != earlier[$0] }
+        if changes.isEmpty { return result(.alreadyCompliant, "the settings are already as they were") }
+        guard item.observed == .object(before) else {
+            return result(.refused, "the software update settings changed since planning; make a new plan")
+        }
+        for key in changes {
+            let args: [String]
+            switch earlier[key] {
+            case .bool(let b)?: args = ["write", softwareUpdateDomain, key, "-bool", b ? "true" : "false"]
+            case nil: args = ["delete", softwareUpdateDomain, key]
+            case let other?: return result(.refused, "the recorded earlier value of \(key) (\(other)) isn't a boolean")
+            }
+            guard let r = runner.run("/usr/bin/defaults", args, timeout: 15), !r.timedOut, r.status == 0 else {
+                return result(.failed, "could not restore \(key)")
+            }
+        }
+        guard let after = collector.softwareUpdateSettings() else {
+            return result(.failed, "could not read the software update settings afterwards")
+        }
+        let wrong = keys.filter { after.prefs[$0] != earlier[$0] }
+        guard wrong.isEmpty else { return result(.failed, "\(wrong.joined(separator: " and ")) didn't go back to the earlier value") }
+        return result(.applied, "restored \(changes.joined(separator: " and "))")
     }
 
     static let spctl = "/usr/sbin/spctl"

@@ -38,6 +38,10 @@ public struct PlanItem: Codable, Sendable, Equatable {
     /// What the item does, from the catalog and the validated parameters: the text for the listing and the prompt.
     public var description: String {
         guard let action = RemediationCatalog.action(self.action) else { return "unknown change \(self.action)" }
+        if action.reverses != nil {
+            guard let reverted = try? UndoRules.validate(parameters) else { return action.summary }
+            return "\(action.summary) (undoes plan \(reverted.prefix(8)))"
+        }
         guard action.takesParameters, let p = try? ExceptionRules.validate(ruleID: ruleID, parameters,
                                                                             requireReason: action.id == RemediationCatalog.exceptionAdd.id) else {
             return action.summary
@@ -107,7 +111,9 @@ public struct Plan: Codable, Sendable, Equatable {
             guard item.summary == action.summary, item.fact == action.fact else {
                 throw PlanError("`\(item.action)`'s description in the plan does not match Farrier's")
             }
-            if action.takesParameters {
+            if action.reverses != nil {
+                _ = try UndoRules.validate(item.parameters)
+            } else if action.takesParameters {
                 _ = try ExceptionRules.validate(ruleID: item.ruleID, item.parameters,
                                                 requireReason: action.id == RemediationCatalog.exceptionAdd.id)
             } else if item.parameters != nil {
@@ -145,8 +151,12 @@ public struct RemediationAction: Sendable, Equatable {
     /// helper refuses when one is set.
     public let managedPreference: ManagedBy?
     public let summary: String
-    /// Exceptions carry their scope as parameters; everything else is fully described by the action.
-    public var takesParameters: Bool { id.hasPrefix("exception.") }
+    /// For an undo action: the action it reverses. Undo actions only restore what the helper's journal says that
+    /// action changed (the helper checks), so they can't be used to weaken a setting Farrier didn't change.
+    public var reverses: String? = nil
+    /// Exceptions carry their scope as parameters, undo actions the plan they reverse; everything else is fully
+    /// described by the action.
+    public var takesParameters: Bool { id.hasPrefix("exception.") || reverses != nil }
 }
 
 public enum RemediationCatalog {
@@ -192,8 +202,43 @@ public enum RemediationCatalog {
     /// The keys `securityAutoInstall` sets to true.
     public static let securityAutoInstallKeys = ["CriticalUpdateInstall", "ConfigDataInstall"]
 
+    // Undo: each restores the state recorded when the forward action was applied (T4 too, approved the same way).
+    public static let firewallRestore = undo(firewallEnable, id: "firewall.restore",
+                                             summary: "Undo: turn the application firewall off again")
+    public static let firewallStealthRestore = undo(firewallStealthEnable, id: "firewall.stealthRestore",
+                                                    summary: "Undo: turn the firewall's stealth mode off again")
+    public static let securityAutoInstallRestore = undo(securityAutoInstall, id: "softwareupdate.restoreSecurityAutoInstall",
+                                                        summary: "Undo: restore the previous automatic security update settings")
+
+    private static func undo(_ forward: RemediationAction, id: String, summary: String) -> RemediationAction {
+        var a = RemediationAction(id: id, tier: forward.tier, fact: forward.fact, compliantValues: [],
+                                  managedPayloadTypes: forward.managedPayloadTypes,
+                                  managedDeclarationTypes: forward.managedDeclarationTypes,
+                                  managedPreference: forward.managedPreference, summary: summary)
+        a.reverses = forward.id
+        return a
+    }
+
     public static let all: [RemediationAction] = [firewallEnable, firewallStealthEnable, gatekeeperEnable, securityAutoInstall,
-                                                  exceptionAdd, exceptionRemove]
+                                                  exceptionAdd, exceptionRemove,
+                                                  firewallRestore, firewallStealthRestore, securityAutoInstallRestore]
+
+    /// The undo action for `actionID`, if Farrier can undo it.
+    public static func undo(of actionID: String) -> RemediationAction? { all.first { $0.reverses == actionID } }
+
+    /// Why an applied action has no undo, in words for the user.
+    public static func noUndoReason(_ actionID: String) -> String {
+        switch actionID {
+        case gatekeeperEnable.id:
+            return "Farrier doesn't turn Gatekeeper off; if you need to, it's in System Settings → Privacy & Security"
+        case exceptionAdd.id:
+            return "withdraw the exception with `farrier exceptions remove`"
+        case exceptionRemove.id:
+            return "accept it again with `farrier exceptions add`"
+        default:
+            return "Farrier can't undo `\(actionID)`"
+        }
+    }
 
     public static func action(_ id: String) -> RemediationAction? { all.first { $0.id == id } }
 }
@@ -330,5 +375,61 @@ extension Planner {
                             observed: .string(match.reason), parameters: parameters)
         let created = Int64(now.timeIntervalSince1970)
         return Plan(id: id, createdAt: created, expiresAt: created + ttl, host: host, items: [item])
+    }
+}
+
+// MARK: - Undo
+
+/// The one parameter an undo item takes: the id of the plan it reverses.
+public enum UndoRules {
+    public static func validate(_ parameters: [String: String]?) throws -> String {
+        guard let parameters, parameters.count == 1, let planID = parameters["reverts"] else {
+            throw PlanError("an undo item takes exactly one parameter, `reverts`")
+        }
+        guard planID.count == 36, UUID(uuidString: planID) != nil, planID == planID.lowercased() else {
+            throw PlanError("`reverts` must be a plan id")
+        }
+        return planID
+    }
+}
+
+extension Planner {
+    /// Plans undoing what plan `planID` changed, from the helper's journal. Each change it applied that Farrier can
+    /// undo becomes an undo item, observed at its current state; anything else is listed with the reason.
+    public static func planUndo(planID: String, journal: [JournalRecord], facts: FactStore, host: String,
+                                now: Date = Date(), ttl: Int64 = Plan.defaultTTL,
+                                id: String = UUID().uuidString.lowercased()) throws -> (plan: Plan?, skipped: [PlanSkip]) {
+        let applied = journal.filter { $0.planID == planID && $0.outcome == "applied" && $0.action != nil && $0.ruleID != nil }
+        guard !applied.isEmpty else { throw PlanError("the helper's journal has no change applied by plan \(planID.prefix(8))") }
+        var items: [PlanItem] = []
+        var skipped: [PlanSkip] = []
+        for record in applied {
+            let ruleID = record.ruleID!, actionID = record.action!
+            if let reverse = RemediationCatalog.action(actionID), reverse.reverses != nil {
+                skipped.append(PlanSkip(ruleID: ruleID, reason: "this was itself an undo; plan the fix again instead"))
+                continue
+            }
+            guard let undo = RemediationCatalog.undo(of: actionID) else {
+                skipped.append(PlanSkip(ruleID: ruleID, reason: RemediationCatalog.noUndoReason(actionID)))
+                continue
+            }
+            if journal.contains(where: { $0.reverts == planID && $0.ruleID == ruleID && $0.action == undo.id && $0.outcome == "applied" }) {
+                skipped.append(PlanSkip(ruleID: ruleID, reason: "already undone"))
+                continue
+            }
+            guard record.previous != nil else {
+                skipped.append(PlanSkip(ruleID: ruleID, reason: "the journal has no earlier state for it (applied by an older Farrier)"))
+                continue
+            }
+            guard let observed = facts.value(for: undo.fact) else {
+                skipped.append(PlanSkip(ruleID: ruleID, reason: "`\(undo.fact)` could not be read"))
+                continue
+            }
+            items.append(PlanItem(ruleID: ruleID, action: undo.id, tier: undo.tier, summary: undo.summary, fact: undo.fact,
+                                  observed: observed, parameters: ["reverts": planID]))
+        }
+        guard !items.isEmpty else { return (nil, skipped) }
+        let created = Int64(now.timeIntervalSince1970)
+        return (Plan(id: id, createdAt: created, expiresAt: created + ttl, host: host, items: items), skipped)
     }
 }

@@ -131,7 +131,10 @@ To do:
   first real (notarized) release to be tested
 - MCP: progress notifications for long calls; resources (`farrier://plan/{id}`, `farrier://journal/recent`); the
   other runbook prompts; validation with Claude Desktop
-- Undo for T4 changes (record the previous state, plan the reverse change)
+- Undo for T4 changes: **written, not yet validated on the VM.** The helper's journal records the state each change
+  replaced (`previous`); `farrier undo <plan>` and MCP `plan_undo` plan the reverse (`firewall.restore`,
+  `firewall.stealthRestore`, `softwareupdate.restoreSecurityAutoInstall`), and the helper restores from its own
+  journal only what that plan changed. Gatekeeper and exceptions have no undo
 - `posture.core` pack: about 25 high-value checks with mSCP mappings
 - `inventory` with signing and notarization status for launchd jobs, login items and extensions
 - `inventory` tools in the MCP server, and `--json` everywhere in the CLI

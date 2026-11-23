@@ -96,13 +96,51 @@ struct PlanPosture: ParsableCommand {
     }
 }
 
+struct Undo: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Plan undoing what an applied plan changed. Nothing changes until `farrier apply`.",
+        discussion: """
+        Reads the privileged helper's journal, which records the state each change replaced, and plans restoring it \
+        (the firewall, stealth mode, automatic security updates). The helper only undoes changes its journal shows \
+        that plan made, and only if the setting is still as Farrier left it. Applying the undo plan asks for Touch \
+        ID or your password, like any change to system settings.
+        """
+    )
+
+    @Argument(help: "The applied plan's id, or a unique prefix (see `farrier journal show --helper`).")
+    var planID: String
+
+    @Flag(help: "Output JSON.")
+    var json = false
+
+    func run() throws {
+        let out: PlanOutput
+        do {
+            out = try Operations.planUndo(FarrierContext.live(actor: "cli"), id: planID)
+        } catch let error as OperationError {
+            note("\(error)")
+            throw ExitCode(2)
+        }
+        if json {
+            try Output.json(out)
+            return
+        }
+        if let plan = out.plan { printPlan(plan) } else { print("nothing to undo automatically") }
+        if !out.skipped.isEmpty {
+            print("left out:")
+            for s in out.skipped { print("  \(s.ruleID): \(s.reason)") }
+        }
+        if let plan = out.plan { print("\nreview it, then run: farrier apply \(plan.id.prefix(8))") }
+    }
+}
+
 func printPlan(_ plan: Plan) {
     let expires = Date(timeIntervalSince1970: TimeInterval(plan.expiresAt))
     let left = max(0, Int(expires.timeIntervalSinceNow / 60))
     print("plan \(plan.id)  (\(plan.tier.rawValue), hash \(plan.shortHash()), expires in \(left) min)")
     for item in plan.items {
         print("  [\(item.tier.rawValue)] \(item.description)")
-        if item.parameters == nil {
+        if item.parameters == nil || RemediationCatalog.action(item.action)?.reverses != nil {
             print("        rule \(item.ruleID): \(item.fact) is \(item.observed)  → action \(item.action)")
         } else {
             let label = item.action == RemediationCatalog.exceptionRemove.id ? "reason it was accepted" : "covers"
