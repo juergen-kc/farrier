@@ -95,6 +95,8 @@ public struct FactsOutput: Codable {
 public struct PostureOutput: Codable {
     public let findings: [Finding]
     public let summary: [String: Int]
+    /// How this Mac is managed (MDM enrollment, profiles, managed preferences).
+    public let management: ManagementSummary
     /// How each fact was obtained, or why it's missing (only for the facts the evaluated rules use).
     public let collection: [CollectionNote]
     /// The approved exceptions in effect, and why none could be read if so.
@@ -178,7 +180,8 @@ public enum Operations {
         let collected = ctx.collectFacts()
         let (exceptions, exceptionsProblem) = ctx.exceptions()
         let report = PostureEngine.evaluate(packs, facts: StaticFactStore(collected), exceptions: exceptions)
-        var used: Set<String> = [CoreFacts.profilePayloadTypes, CoreFacts.declarationTypes]
+        var used: Set<String> = [CoreFacts.profilePayloadTypes, CoreFacts.declarationTypes, CoreFacts.managedPreferences,
+                                 CoreFacts.profiles, CoreFacts.enrollment]
         for pack in packs { for case .check(let rule) in pack.rules { used.insert(rule.fact) } }
         let findings = ruleIDs.map { ids in report.findings.filter { ids.contains($0.ruleID) } } ?? report.findings
         if let ruleIDs {
@@ -186,6 +189,7 @@ public enum Operations {
             guard unknown.isEmpty else { throw OperationError("no such posture rule: \(unknown.sorted().joined(separator: ", "))") }
         }
         return PostureOutput(findings: findings, summary: PostureReport(findings: findings).summary,
+                             management: ManagementSummary(facts: StaticFactStore(collected)),
                              collection: collected.notes.filter { used.contains($0.fact) }.sorted { $0.fact < $1.fact },
                              exceptions: exceptions, exceptionsProblem: exceptionsProblem)
     }

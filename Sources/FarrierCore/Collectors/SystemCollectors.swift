@@ -50,15 +50,19 @@ public struct SystemCollectors: Sendable {
     /// Separate from `readFile`, so an absent file can be told apart from one that exists but can't be read.
     public let fileExists: @Sendable (String) -> Bool
     public let signatures: CodeSignatureChecking
+    /// Directory entries (names), or nil if the directory can't be listed. Only asked after `fileExists`.
+    public let listDirectory: @Sendable (String) -> [String]?
 
     public init(runner: CommandRunning = ProcessRunner(),
                 readFile: @escaping @Sendable (String) -> Data? = { FileManager.default.contents(atPath: $0) },
                 fileExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
-                signatures: CodeSignatureChecking = SecurityFrameworkSignatures()) {
+                signatures: CodeSignatureChecking = SecurityFrameworkSignatures(),
+                listDirectory: @escaping @Sendable (String) -> [String]? = { try? FileManager.default.contentsOfDirectory(atPath: $0) }) {
         self.runner = runner
         self.readFile = readFile
         self.fileExists = fileExists
         self.signatures = signatures
+        self.listDirectory = listDirectory
     }
 
     /// A property-list file: absent (nil, nil), read (object, nil), or present but unreadable/corrupt (nil, problem).
@@ -138,11 +142,51 @@ public struct SystemCollectors: Sendable {
 
         collectSoftwareUpdate(into: &facts, notes: &notes)
         collectDeclarationTypes(into: &facts, notes: &notes)
+        collectManagedPreferences(into: &facts, notes: &notes)
 
         let launch = LaunchItemsCollector(fileExists: fileExists, readFile: readFile, signatures: signatures).collect()
         if let value = launch.value { facts[LaunchItemsCollector.fact] = value }
         notes.append(launch.note)
         return CollectionResult(facts: facts, notes: notes)
+    }
+
+    static let managedPreferencesDirectory = "/Library/Managed Preferences"
+
+    /// `mdm.managedPreferences` alone, parsed (the helper checks it before changing a setting). Nil if unreadable.
+    public func managedPreferences() -> [String: Set<String>]? {
+        var facts: [String: FactValue] = [:]
+        var notes: [CollectionNote] = []
+        collectManagedPreferences(into: &facts, notes: &notes)
+        return PostureEngine.managedPreferences(StaticFactStore(facts))
+    }
+
+    /// Computer-level managed preferences: every domain a profile sets, with its keys, `{ domain: [keys] }`. Any
+    /// profile can write them (Custom Settings, not only a setting's own payload), and their values win over the
+    /// local ones. No directory means none (`{}`); a domain file that can't be read makes the whole fact unknown,
+    /// because it could hide a managed key. Per-user subfolders aren't read yet.
+    func collectManagedPreferences(into facts: inout [String: FactValue], notes: inout [CollectionNote]) {
+        let fact = CoreFacts.managedPreferences
+        let dir = Self.managedPreferencesDirectory
+        guard fileExists(dir) else {
+            facts[fact] = .object([:])
+            notes.append(CollectionNote(fact: fact, status: .collected, source: dir, detail: "no managed preferences"))
+            return
+        }
+        guard let names = listDirectory(dir) else {
+            notes.append(CollectionNote(fact: fact, status: .failed, source: dir, detail: "cannot list \(dir)"))
+            return
+        }
+        var domains: [String: FactValue] = [:]
+        for name in names.sorted() where name.hasSuffix(".plist") {
+            let (object, problem) = loadPlist("\(dir)/\(name)")
+            guard let object else {
+                notes.append(CollectionNote(fact: fact, status: .failed, source: dir, detail: problem ?? "cannot read \(name)"))
+                return
+            }
+            domains[String(name.dropLast(".plist".count))] = .array(object.keys.sorted().map(FactValue.string))
+        }
+        facts[fact] = .object(domains)
+        notes.append(CollectionNote(fact: fact, status: .collected, source: dir, detail: nil))
     }
 
     /// Declarative Device Management declarations only ever come from an MDM server, so a Mac that isn't

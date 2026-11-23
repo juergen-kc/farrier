@@ -107,6 +107,7 @@ struct Posture: ParsableCommand {
             try Output.json(out)
             return
         }
+        print("this Mac: \(out.management.description)")
         for f in out.findings {
             let mark: String
             switch f.status {
@@ -115,9 +116,9 @@ struct Posture: ParsableCommand {
             case .unknown: mark = "????"
             }
             var line = "\(mark)  \(f.severity.rawValue.padding(toLength: 8, withPad: " ", startingAt: 0)) \(f.ruleID)"
-            if f.managed { line += "  [managed by \(f.managedBy ?? "MDM")]" }
+            if f.managed { line += "  [managed by \(f.managedByProfile.map { "profile \($0)" } ?? f.managedBy ?? "MDM")]" }
             if f.fixable { line += "  [fixable]" }
-            if f.managementUnknown && f.status != .pass { line += "  [MDM profiles not checked]" }
+            if f.managementUnknown && f.status != .pass { line += "  [MDM management not checked]" }
             if let accepted = f.accepted { line += "  [\(accepted.count) accepted by exception]" }
             print(line)
             if let reason = f.reason { print("      \(reason)") }

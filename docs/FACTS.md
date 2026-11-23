@@ -23,6 +23,7 @@ Rules of the road:
 | `gatekeeper.assessments` | `/usr/sbin/spctl --status` | `enabled`, `disabled` |
 | `firewall.globalState` | `/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate` | `off`, `on`, `blockAll` |
 | `mdm.enrollment` | `/usr/bin/profiles status -type enrollment` | `{ dep, mdm, userApproved }` (booleans) |
+| `mdm.managedPreferences` | the plists in `/Library/Managed Preferences` (computer level; per-user subfolders aren't read yet) | `{ domain: [keys] }`: every preference domain a profile sets, with its keys; `{}` when the folder doesn't exist. A domain file that can't be read makes the whole fact `failed`, never partial |
 | `mdm.declarationTypes` | derived from `mdm.enrollment`: declarations (Declarative Device Management) only come from an MDM server | `[]` on a Mac that isn't MDM-enrolled; left out (`unavailable`) on an enrolled Mac, where reading them isn't supported yet, or when enrollment is unknown |
 | `softwareupdate.prefs` | `/Library/Preferences/com.apple.SoftwareUpdate.plist`, overridden by `/Library/Managed Preferences/com.apple.SoftwareUpdate.plist` | `{ AutomaticCheckEnabled, AutomaticDownload, CriticalUpdateInstall, ConfigDataInstall, AutomaticallyInstallMacOSUpdates, AutomaticallyInstallAppUpdates }`; only the keys that are set |
 | `softwareupdate.managedKeys` | the managed preferences above | the keys a profile sets |
@@ -59,6 +60,7 @@ caller is in the console session. Otherwise `farrier facts` lists them as `unava
 |---|---|---|
 | `network.listeningTCP` | `/usr/sbin/netstat -anp tcp` as root (see the T0 table) | as above |
 | `mdm.payloadTypes` | `/usr/bin/profiles show -output stdout-xml` | sorted, unique `PayloadType`s of the computer-level profiles; `[]` when none are installed |
+| `mdm.profiles` | the same output | the computer-level profiles: `[{ identifier, displayName, organization, payloadTypes, mdmServer }]`, sorted by identifier; `mdmServer` is the host of the MDM payload's `ServerURL` (enrollment profile only). No other payload contents |
 | `helper.fullDiskAccess` | opens (doesn't read) the system `TCC.db`, or `com.apple.TimeMachine.plist` if that's missing: only Full Disk Access allows it, even for root | `true` / `false`; missing (with the reason) if neither file exists or the error is unexpected |
 | `tcc.grants` | the system `TCC.db` (`/Library/Application Support/com.apple.TCC/TCC.db`), read-only with SQLite; **needs Full Disk Access** | allowed grants for Full Disk Access, Accessibility, Screen Recording, Input Monitoring, sending events, Endpoint Security and Developer Tools: `[{service, client, clientType}]` (`service` is `fullDiskAccess`, `accessibility`, `screenRecording`, `inputMonitoring`, `postEvents`, `endpointSecurity` or `developerTools`; `clientType` is `bundle` or `path`), sorted |
 
@@ -82,3 +84,11 @@ Mac that isn't MDM-enrolled, so `mdm.payloadTypes` always needs the helper. Decl
 none. So a finding for a rule with `managedBy` is marked `managementUnknown` and is **never `fixable`** when the
 helper isn't available, or, for rules a declaration could manage (such as automatic security updates), on an
 MDM-enrolled Mac. The helper checks enrollment again itself before changing such a setting.
+
+**Managed preferences.** Any profile can set a preference domain's keys (Custom Settings, not only a setting's own
+payload), and the managed value overrides the local one. Rules list the keys that matter as `managedBy: preference`;
+if one is in `mdm.managedPreferences`, the finding is `managed` (for example "managed preferences
+com.apple.SoftwareUpdate (CriticalUpdateInstall)"), and each fix in the catalog has the helper check the same keys
+again before changing anything. A managed finding names the profile that carries its payload when `mdm.profiles` is
+known. `farrier posture` starts with a one-line summary of how the Mac is managed (`management` in the JSON and in
+the MCP `posture_check` result).

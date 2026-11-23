@@ -93,11 +93,14 @@ public enum ToolCatalog {
              inputSchema: schema(), annotations: readOnly("Collect facts")),
         Tool(name: "posture_check", title: "Check posture",
              description: "Evaluate the posture rules against this Mac. Each finding has a status (pass, fail, unknown), "
-                 + "severity, and the flags managed (an MDM profile owns the setting), managementUnknown (MDM profiles "
-                 + "could not be checked) and fixable (Farrier can plan a fix).",
+                 + "severity, and the flags managed (an MDM profile, declaration or managed preference owns the setting; "
+                 + "managedByProfile names the profile), managementUnknown (that could not be checked) and fixable (Farrier "
+                 + "can plan a fix). `management` says whether the Mac is MDM-enrolled, with which server, and its profiles: "
+                 + "settings an MDM manages are changed in the MDM, never by Farrier.",
              inputSchema: schema(["ruleIDs": ruleIDs]), annotations: readOnly("Check posture")),
         Tool(name: "posture_explain", title: "Explain a posture rule",
-             description: "What a posture rule checks, the expected value, which MDM payloads can manage it, and how it "
+             description: "What a posture rule checks, the expected value, which MDM payloads, declarations or managed "
+                 + "preferences can manage it, and how it "
                  + "is fixed (automatically by Farrier, or by hand following the guidance).",
              inputSchema: schema(["ruleID": ["type": "string"]], required: ["ruleID"]),
              annotations: readOnly("Explain a posture rule")),

@@ -43,6 +43,7 @@ rules:
     expect: { equals: enabled }
     managedBy:
       - payloadType: com.apple.systempolicy.control
+      - { preference: com.apple.systempolicy.control, keys: [EnableAssessment] }
     remediation:
       automatic: true
       action: gatekeeper.enable          # allowlisted helper setting (T4)
@@ -57,6 +58,7 @@ rules:
     expect: { in: ["on", "blockAll"] }   # quoted: unquoted on/off are booleans in YAML 1.1
     managedBy:
       - payloadType: com.apple.security.firewall
+      - { preference: com.apple.security.firewall, keys: [EnableFirewall] }
     remediation:
       automatic: true
       action: firewall.enable
@@ -75,6 +77,7 @@ rules:
     managedBy:
       - payloadType: com.apple.SoftwareUpdate
       - declarationType: com.apple.configuration.softwareupdate.settings
+      - { preference: com.apple.SoftwareUpdate, keys: [CriticalUpdateInstall, ConfigDataInstall] }
     remediation:
       automatic: true
       action: softwareupdate.enableSecurityAutoInstall
@@ -102,6 +105,7 @@ rules:
     expect: { equals: "on" }   # quoted: unquoted on/off are booleans in YAML 1.1
     managedBy:
       - payloadType: com.apple.security.firewall
+      - { preference: com.apple.security.firewall, keys: [EnableStealthMode] }
     remediation:
       automatic: true
       action: firewall.stealthEnable

@@ -15,7 +15,8 @@ private func plan(_ rule: String, _ facts: [String: FactValue]) throws -> (Plan?
     return Planner.plan(report: report, packs: packs, facts: store, ruleIDs: [rule], host: "H")
 }
 
-private let unmanaged: [String: FactValue] = ["mdm.payloadTypes": .array([]), "mdm.declarationTypes": .array([])]
+private let unmanaged: [String: FactValue] = ["mdm.payloadTypes": .array([]), "mdm.declarationTypes": .array([]),
+                                              "mdm.managedPreferences": .object([:])]
 
 @Suite("Gatekeeper and security auto-install fixes")
 struct MoreFixesTests {
@@ -28,7 +29,8 @@ struct MoreFixesTests {
         #expect(try Plan.decodeCanonical(try #require(p).canonicalData()) == p)
         // A Gatekeeper profile means MDM owns it.
         let (managed, skipped) = try plan("posture.core.gatekeeper", ["gatekeeper.assessments": .string("disabled"),
-            "mdm.payloadTypes": .array([.string("com.apple.systempolicy.control")]), "mdm.declarationTypes": .array([])])
+            "mdm.payloadTypes": .array([.string("com.apple.systempolicy.control")]), "mdm.declarationTypes": .array([]),
+            "mdm.managedPreferences": .object([:])])
         #expect(managed == nil)
         #expect(skipped.first?.reason.contains("managed by com.apple.systempolicy.control") == true)
     }
@@ -46,13 +48,14 @@ struct MoreFixesTests {
 
     @Test func securityAutoInstallIsNeverPlannedWhenDeclarationsAreUnknown() throws {
         // An MDM-enrolled Mac: payloads read, declarations not. A declaration could own the setting.
-        let facts: [String: FactValue] = ["mdm.payloadTypes": .array([]),
+        let facts: [String: FactValue] = ["mdm.payloadTypes": .array([]), "mdm.managedPreferences": .object([:]),
                                           "softwareupdate.prefs": .object(["CriticalUpdateInstall": .bool(false), "ConfigDataInstall": .bool(true)])]
         let (p, skipped) = try plan("posture.core.auto-security-updates", facts)
         #expect(p == nil)
         #expect(skipped.first?.reason.contains("declarations") == true)
         // Gatekeeper's rule names no declaration, so it doesn't need them.
-        let (gk, _) = try plan("posture.core.gatekeeper", ["mdm.payloadTypes": .array([]), "gatekeeper.assessments": .string("disabled")])
+        let (gk, _) = try plan("posture.core.gatekeeper", ["mdm.payloadTypes": .array([]), "mdm.managedPreferences": .object([:]),
+                                                            "gatekeeper.assessments": .string("disabled")])
         #expect(gk != nil)
     }
 

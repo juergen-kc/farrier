@@ -123,7 +123,11 @@ To do:
   other runbook prompts; validation with Claude Desktop
 - Undo for T4 changes (record the previous state, plan the reverse change)
 - `posture.core` pack: about 25 high-value checks with mSCP mappings
-- Managed-device detection (`managed` findings are not fixable locally)
+- Managed-device detection: **written, not yet validated on the VM.** Beyond profile payload types: managed
+  preferences (`mdm.managedPreferences`, any profile's keys, as a new `managedBy: preference` selector, also checked
+  by the helper before every fix), the profiles by name (`mdm.profiles`, so a managed finding says which profile), the
+  MDM server, and a one-line management summary at the top of `farrier posture` and in `posture_check`. Still open:
+  reading DDM declarations on enrolled Macs, and per-user managed preferences
 - `inventory` with signing and notarization status for launchd jobs, login items and extensions
 - `inventory` tools in the MCP server, and `--json` everywhere in the CLI
 - `--redact`

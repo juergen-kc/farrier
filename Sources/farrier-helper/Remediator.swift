@@ -26,6 +26,17 @@ enum Remediator {
             }
         }
 
+        // Managed preferences win over local ones, whichever profile set them (Custom Settings too).
+        if let mp = action.managedPreference, let domain = mp.preference {
+            guard let managed = SystemCollectors(runner: runner).managedPreferences() else {
+                return result(.refused, "could not read the managed preferences, so a profile might manage this")
+            }
+            let set = (mp.keys ?? []).filter { managed[domain]?.contains($0) ?? false }
+            if !set.isEmpty {
+                return result(.refused, "managed by a profile (\(domain): \(set.joined(separator: ", "))); change it in the profile or MDM")
+            }
+        }
+
         // Declarations (DDM) can't be read yet, and only MDM delivers them: on an enrolled Mac, or if enrollment
         // can't be read, a setting a declaration could own isn't touched.
         if !action.managedDeclarationTypes.isEmpty {

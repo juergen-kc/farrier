@@ -29,6 +29,7 @@ struct HelperKitTests {
         #expect(PrivilegedFact(rawValue: "mdm.payloadTypes") == .mdmPayloadTypes)
         #expect(PrivilegedFact(rawValue: "network.listeningTCP") == .listeningTCP)
         #expect(PrivilegedFact(rawValue: "helper.fullDiskAccess") == .fullDiskAccess)
+        #expect(PrivilegedFact(rawValue: "mdm.profiles") == .mdmProfiles)
         #expect(PrivilegedFact(rawValue: "tcc.grants") == .tccGrants)
         #expect(PrivilegedFact(rawValue: "/etc/master.passwd") == nil)
         #expect(PrivilegedFact(rawValue: "../mdm.payloadTypes") == nil)
