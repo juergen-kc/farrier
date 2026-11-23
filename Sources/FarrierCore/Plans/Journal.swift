@@ -15,9 +15,14 @@ public struct JournalRecord: Codable, Sendable, Equatable {
     /// `approved`, `refused`, `applied`, `alreadyCompliant`, `failed`, …
     public let outcome: String
     public let detail: String?
+    /// For an applied change that can be undone: the state before it, as the helper verified it. Undo restores it.
+    public let previous: FactValue?
+    /// For an undo: the plan whose change this reverses.
+    public let reverts: String?
 
     public init(time: Int64, actor: String, planID: String, planHash: String, ruleID: String? = nil,
-                action: String? = nil, outcome: String, detail: String? = nil) {
+                action: String? = nil, outcome: String, detail: String? = nil, previous: FactValue? = nil,
+                reverts: String? = nil) {
         self.time = time
         self.actor = actor
         self.planID = planID
@@ -26,6 +31,8 @@ public struct JournalRecord: Codable, Sendable, Equatable {
         self.action = action
         self.outcome = outcome
         self.detail = detail
+        self.previous = previous
+        self.reverts = reverts
     }
 }
 

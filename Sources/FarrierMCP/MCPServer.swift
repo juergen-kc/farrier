@@ -111,6 +111,13 @@ public enum ToolCatalog {
              inputSchema: schema(["ruleIDs": ruleIDs]),
              annotations: .init(title: "Plan posture fixes", readOnlyHint: false, destructiveHint: false,
                                 idempotentHint: false, openWorldHint: false)),
+        Tool(name: "plan_undo", title: "Plan undoing a plan",
+             description: "Make a plan that undoes the changes an applied plan made (the firewall, stealth mode, automatic "
+                 + "security updates), restoring the state the privileged helper recorded before it changed anything. "
+                 + "Only when the user asks for it. Nothing changes until apply_plan, which asks the user on the Mac.",
+             inputSchema: schema(["planID": planID], required: ["planID"]),
+             annotations: .init(title: "Plan undoing a plan", readOnlyHint: false, destructiveHint: false,
+                                idempotentHint: false, openWorldHint: false)),
         Tool(name: "plan_show", title: "Show a plan",
              description: "Show a saved plan: its items, tier, hash, and whether it has expired or needs approval.",
              inputSchema: schema(["planID": planID], required: ["planID"]), annotations: readOnly("Show a plan")),
@@ -162,6 +169,8 @@ public enum ToolCatalog {
                 return try result(Operations.explain(ctx, ruleID: try string(args["ruleID"], "ruleID")))
             case "posture_plan_remediation":
                 return try result(Operations.planPosture(ctx, ruleIDs: try stringSet(args["ruleIDs"])))
+            case "plan_undo":
+                return try result(Operations.planUndo(ctx, id: try string(args["planID"], "planID")))
             case "plan_show":
                 return try result(Operations.show(ctx, id: try string(args["planID"], "planID")))
             case "apply_plan":

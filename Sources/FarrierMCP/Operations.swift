@@ -229,6 +229,39 @@ public enum Operations {
         return PlanOutput(plan: plan, planHash: hash, skipped: skipped, path: url.path, next: next)
     }
 
+    /// Plans undoing an applied plan (by id or unique prefix), from the helper's journal. Nothing changes until the
+    /// undo plan is applied, which asks the user on the Mac like any other T4 plan.
+    public static func planUndo(_ ctx: FarrierContext, id: String, journal: Journal = helperJournal,
+                                now: Date = Date()) throws -> PlanOutput {
+        let records: [JournalRecord]
+        do { records = try journal.entries().map(\.record) } catch {
+            throw OperationError("can't read the helper's journal: \(error)")
+        }
+        let applied = Set(records.filter { $0.outcome == "applied" && $0.ruleID != nil }.map(\.planID))
+        let matches = applied.filter { $0.hasPrefix(id.lowercased()) }
+        guard matches.count == 1, let planID = matches.first, !id.isEmpty else {
+            throw OperationError(matches.isEmpty ? "no applied plan \(id) in the helper's journal"
+                                                 : "\(id) matches more than one applied plan; give more of the id")
+        }
+        let (plan, skipped): (Plan?, [PlanSkip])
+        do {
+            (plan, skipped) = try Planner.planUndo(planID: planID, journal: records, facts: StaticFactStore(ctx.collectFacts()),
+                                                   host: ctx.host(), now: now)
+        } catch let error as PlanError {
+            throw OperationError(error.description)
+        }
+        guard let plan else {
+            return PlanOutput(plan: nil, planHash: nil, skipped: skipped, path: nil, next: "nothing to undo automatically")
+        }
+        let url = try ctx.plans.save(plan)
+        let hash = try plan.hash().hexString
+        try? ctx.journal.append(JournalRecord(time: plan.createdAt, actor: ctx.actor, planID: plan.id, planHash: hash,
+                                              outcome: "planned", detail: "undo of \(planID.prefix(8)): \(plan.items.count) item(s)",
+                                              reverts: planID))
+        return PlanOutput(plan: plan, planHash: hash, skipped: skipped, path: url.path,
+                          next: "review the undo plan with the user; applying it asks them for Touch ID or their password on this Mac")
+    }
+
     public static func exceptions(_ ctx: FarrierContext) -> ExceptionsOutput {
         let (list, problem) = ctx.exceptions()
         return ExceptionsOutput(exceptions: list, problem: problem, path: ExceptionStore.defaultPath)

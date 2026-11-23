@@ -120,7 +120,8 @@ F=/Applications/Farrier.app/Contents/MacOS/farrier; $F plan posture
 F=/Applications/Farrier.app/Contents/MacOS/farrier; $F apply <plan-id>
 ```
 
-Settings an MDM profile manages are never planned. `farrier journal verify` checks the record of what was changed.
+Settings an MDM profile manages are never planned. `farrier journal verify` checks the record of what was changed,
+and `farrier undo <plan-id>` plans putting back what a plan changed (approved the same way).
 
 A known, acceptable finding (say, a VM's guest tools that are signed but not notarized) can be accepted per vendor,
 with the same approval: `farrier exceptions add --team 4C6364ACXT --reason "Parallels Guest Tools in this VM"`, then

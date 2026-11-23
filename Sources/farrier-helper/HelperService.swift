@@ -132,9 +132,11 @@ extension HelperService {
     /// without a record (a full disk or a damaged journal stops remediation).
     @discardableResult
     private static func record(_ planID: String, _ planHash: String, _ outcome: String, ruleID: String? = nil,
-                               action: String? = nil, detail: String? = nil) -> Error? {
+                               action: String? = nil, detail: String? = nil, previous: FactValue? = nil,
+                               reverts: String? = nil) -> Error? {
         let r = JournalRecord(time: Int64(Date().timeIntervalSince1970), actor: "helper", planID: planID, planHash: planHash,
-                              ruleID: ruleID, action: action, outcome: outcome, detail: detail)
+                              ruleID: ruleID, action: action, outcome: outcome, detail: detail, previous: previous,
+                              reverts: reverts)
         do {
             try journal.append(r)
             return nil
@@ -236,7 +238,12 @@ extension HelperService {
             let r = Remediator.apply(item, planID: approved.id)
             helperLog("plan \(approved.id) \(item.action): \(r.outcome.rawValue) \(r.detail ?? "")")
             results.append(r)
-            if let error = Self.record(approved.id, hashHex, r.outcome.rawValue, ruleID: item.ruleID, action: item.action, detail: r.detail) {
+            // An applied change that can be undone records the state it replaced: the helper checked before acting that
+            // the Mac was exactly in `observed`, so that's what undo restores. An undo records the plan it reversed.
+            let undoable = r.outcome == .applied && RemediationCatalog.undo(of: item.action) != nil
+            let reverts = RemediationCatalog.action(item.action)?.reverses != nil ? item.parameters?["reverts"] : nil
+            if let error = Self.record(approved.id, hashHex, r.outcome.rawValue, ruleID: item.ruleID, action: item.action,
+                                       detail: r.detail, previous: undoable ? item.observed : nil, reverts: reverts) {
                 // The change is done but unrecorded: say so, and change nothing more.
                 let left = approved.items.count - results.count
                 return reply(HelperWire.encode(ApplyReply(planID: approved.id, results: results,

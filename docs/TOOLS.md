@@ -2,7 +2,8 @@
 
 > Status: design draft. Names and schemas may change before v0.1. **Implemented so far** (`farrier mcp`):
 > `farrier_status`, `facts_collect`, `posture_check`, `posture_explain`, `posture_plan_remediation`, `plan_show`,
-> `apply_plan`, `journal_recent`, `exceptions_list`, `posture_plan_exception`, and the `security-checkup` prompt.
+> `apply_plan`, `plan_undo`, `journal_recent`, `exceptions_list`, `posture_plan_exception`, and the `security-checkup`
+> prompt.
 > `farrier_status`, `facts_collect`, `journal_recent` and the two exception tools are additions to this catalog.
 
 Every tool:
@@ -47,6 +48,7 @@ with on-device approval for T3 and T4.
 
 | Tool | Tier | Description |
 |---|---|---|
+| `plan_undo` | T0 | Plan undoing an applied plan's changes (firewall, stealth mode, automatic security updates), from the helper's journal. |
 | `plan_show` | T0 | Show a plan. |
 | `apply_plan` | plan's tier | Apply a plan. T3/T4 trigger Touch ID on the Mac. Returns per-item results. |
 | `quarantine_list` | T0 | List quarantined plans and their expiry dates. |
