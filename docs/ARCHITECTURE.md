@@ -150,7 +150,7 @@ fixture tests for every supported macOS version.
   | `quarantine(items, planProof)` | Move root-owned items into root quarantine |
   | `restore(planID)` / `expireQuarantine()` | Restore items, or expire them after the retention window |
   | `deleteLocalSnapshot(name, planProof)` | Delete an APFS local snapshot (irreversible, so it is T3) |
-  | `applyPlan(plan, payload, signature)` | Verify the approval and carry out the plan's items, all in one call. Items are **remediation catalog** actions only (so far `firewall.enable`); the helper takes no settings, values, commands or paths from the client |
+  | `applyPlan(plan, payload, signature)` | Verify the approval and carry out the plan's items, all in one call. Items are **remediation catalog** actions only (so far `firewall.enable`, `firewall.stealthEnable`, `gatekeeper.enable`, `softwareupdate.enableSecurityAutoInstall` and the exception changes); the helper takes no settings, values, commands or paths from the client |
   | `uninstallPkgReceipt(id, planProof)` | Remove installer receipts and files listed in a bill of materials (BOM) |
   | `adapterRequest(adapter, op, planProof?)` | Make a signed management-plane call (JumpCloud System Context) |
   | `beginApproval(planHash)` | Issue a one-time nonce and expiry for one approval (prevents replay) |
@@ -277,7 +277,11 @@ writable by others is ignored, so malware running as the user can't accept itsel
 `firewall.enable`: the helper reads the MDM profiles itself and refuses if one manages the firewall, or if it can't
 tell; it reads the current state and reports `alreadyCompliant`, or refuses if the state differs from what the plan
 recorded; then it runs `socketfilterfw --setglobalstate on` and reports success only if reading the state back shows
-the firewall on. Every outcome goes to the helper's journal.
+the firewall on. `gatekeeper.enable` works the same way with `spctl --global-enable` (or `--master-enable`) and
+`spctl --status`. `softwareupdate.enableSecurityAutoInstall` refuses unless the software update settings are exactly
+what the plan recorded, and on any MDM-enrolled Mac (a declaration could manage them, and declarations can't be read
+yet); it sets `CriticalUpdateInstall` and `ConfigDataInstall` with `defaults write` and checks each with `defaults
+read`. Every outcome goes to the helper's journal.
 
 **Console-session check (required, verified).** The helper accepts approval-related calls (`beginApproval`,
 `applyPlan`, enrollment, revocation) only from the user session at the screen. For each call:

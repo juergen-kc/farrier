@@ -104,6 +104,15 @@ Done:
       switch was on; `tcc.grants` then listed 19 grants; turning the switch off was seen at once (`--check` exit 1).
       The running helper picks up both changes without a restart.
 
+- [x] More fixes: automatic security updates (`softwareupdate.enableSecurityAutoInstall`) and Gatekeeper
+      (`gatekeeper.enable`, T4). `mdm.declarationTypes` is `[]` on a Mac that isn't MDM-enrolled (declarations only
+      come from an MDM server), so the update fix can be planned there; on enrolled Macs it isn't, and the helper
+      re-checks enrollment before changing it. **Validated** on the macOS 27.2.1 VM (not enrolled): with
+      `CriticalUpdateInstall` off, the plan showed the settings it saw, the apply turned on only that key, and posture
+      passed right after. **Gatekeeper not validated:** macOS 27 no longer offers "Anywhere" in Privacy & Security, so
+      `spctl --global-disable` can't be confirmed and Gatekeeper can't be turned off locally to test the fix; it needs
+      a macOS 14 or 15 Mac. The helper reports success only if `spctl --status` reads back "enabled".
+
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
   Developer ID signing
@@ -112,7 +121,6 @@ To do:
   first real (notarized) release to be tested
 - MCP: progress notifications for long calls; resources (`farrier://plan/{id}`, `farrier://journal/recent`); the
   other runbook prompts; validation with Claude Desktop
-- More fixes in the remediation catalog: Gatekeeper, automatic security updates
 - Undo for T4 changes (record the previous state, plan the reverse change)
 - `posture.core` pack: about 25 high-value checks with mSCP mappings
 - Managed-device detection (`managed` findings are not fixable locally)

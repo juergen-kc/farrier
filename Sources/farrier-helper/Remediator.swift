@@ -26,7 +26,23 @@ enum Remediator {
             }
         }
 
+        // Declarations (DDM) can't be read yet, and only MDM delivers them: on an enrolled Mac, or if enrollment
+        // can't be read, a setting a declaration could own isn't touched.
+        if !action.managedDeclarationTypes.isEmpty {
+            let r = runner.run("/usr/bin/profiles", ["status", "-type", "enrollment"], timeout: 15)
+            guard let r, !r.timedOut, case .bool(let enrolled)? = Parsers.profilesEnrollment(r.combined)?.object?["mdm"] else {
+                return result(.refused, "could not check MDM enrollment, so a declaration might manage this; change it in System Settings")
+            }
+            if enrolled {
+                return result(.refused, "this Mac is MDM-enrolled and Farrier can't read its declarations yet; change it in your MDM or System Settings")
+            }
+        }
+
         switch action.id {
+        case RemediationCatalog.gatekeeperEnable.id:
+            return setGatekeeper(item, action, runner, result)
+        case RemediationCatalog.securityAutoInstall.id:
+            return setSecurityAutoInstall(item, runner, result)
         case RemediationCatalog.firewallEnable.id:
             return setFirewall(item, action, runner, result, name: "firewall", get: "--getglobalstate",
                                set: ["--setglobalstate", "on"], parse: Parsers.firewallGlobalState)
@@ -76,6 +92,80 @@ enum Remediator {
         }
         let scope = "team \(p.teamID)" + (p.identifier.map { " (\($0))" } ?? "")
         return result(.applied, adding ? "accepted \(scope) for \(item.ruleID)" : "removed the exception for \(scope)")
+    }
+
+    static let spctl = "/usr/sbin/spctl"
+
+    /// Gatekeeper on: `spctl --global-enable` (macOS 15 and later), or `--master-enable` where that's the name, as
+    /// long as reading `spctl --status` back doesn't say "enabled".
+    private static func setGatekeeper(_ item: PlanItem, _ action: RemediationAction, _ runner: CommandRunning,
+                                      _ result: (ItemResult.Outcome, String?) -> ItemResult) -> ItemResult {
+        func read() -> String? {
+            guard let r = runner.run(spctl, ["--status"], timeout: 15), !r.timedOut else { return nil }
+            return Parsers.spctlStatus(r.combined)?.string
+        }
+        guard let before = read() else { return result(.failed, "could not read the Gatekeeper state") }
+        if action.compliantValues.contains(before) { return result(.alreadyCompliant, "Gatekeeper is already \(before)") }
+        guard item.observed.string == before else {
+            return result(.refused, "the Gatekeeper state changed since planning (\(item.observed) → \(before)); make a new plan")
+        }
+        var output = ""
+        for flag in ["--global-enable", "--master-enable"] {
+            guard let r = runner.run(spctl, [flag], timeout: 30) else { return result(.failed, "\(spctl) not found") }
+            if r.timedOut { return result(.failed, "spctl \(flag) timed out") }
+            output = "\(flag): exit \(r.status) \(r.combined.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))"
+            if let after = read(), action.compliantValues.contains(after) {
+                return result(.applied, "Gatekeeper \(before) → \(after)")
+            }
+        }
+        return result(.failed, "Gatekeeper is still \(read() ?? "unreadable") (\(output))")
+    }
+
+    static let softwareUpdateDomain = "/Library/Preferences/com.apple.SoftwareUpdate"
+
+    /// Sets the security auto-install keys to true with `defaults`, only if the settings are still exactly what the
+    /// plan showed, and reports success only if reading each key back gives true.
+    private static func setSecurityAutoInstall(_ item: PlanItem, _ runner: CommandRunning,
+                                               _ result: (ItemResult.Outcome, String?) -> ItemResult) -> ItemResult {
+        let keys = RemediationCatalog.securityAutoInstallKeys
+        let collector = SystemCollectors(runner: runner)
+        guard let (before, managedKeys) = collector.softwareUpdateSettings() else {
+            return result(.failed, "could not read the software update settings")
+        }
+        // Any profile can set these keys as managed preferences (a custom-settings payload, not only
+        // com.apple.SoftwareUpdate). The managed value wins, so a local change would do nothing.
+        let managed = keys.filter(managedKeys.contains)
+        if !managed.isEmpty {
+            return result(.refused, "managed by a profile (\(managed.joined(separator: ", "))); change it in the profile or MDM")
+        }
+        let missing = keys.filter { before[$0] != .bool(true) }
+        if missing.isEmpty { return result(.alreadyCompliant, "\(keys.joined(separator: " and ")) are already on") }
+        guard item.observed == .object(before) else {
+            return result(.refused, "the software update settings changed since planning; make a new plan")
+        }
+        func readBack(_ key: String) -> Bool {
+            guard let r = runner.run("/usr/bin/defaults", ["read", softwareUpdateDomain, key], timeout: 15), !r.timedOut else { return false }
+            return r.status == 0 && r.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "1"
+        }
+        for key in missing {
+            guard let r = runner.run("/usr/bin/defaults", ["write", softwareUpdateDomain, key, "-bool", "true"], timeout: 15) else {
+                return result(.failed, "/usr/bin/defaults not found")
+            }
+            if r.timedOut || r.status != 0 {
+                return result(.failed, "could not set \(key): \(r.combined.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))")
+            }
+            guard readBack(key) else { return result(.failed, "\(key) is still not on after setting it") }
+        }
+        // The effective settings, as posture reads them (managed preferences included), must now be on too.
+        guard let after = collector.softwareUpdateSettings() else {
+            return result(.failed, "could not read the software update settings afterwards")
+        }
+        let stillOff = keys.filter { after.prefs[$0] != .bool(true) }
+        guard stillOff.isEmpty else {
+            return result(.failed, "\(stillOff.joined(separator: " and ")) still reads as off"
+                          + (after.managedKeys.isEmpty ? "" : " (managed keys: \(after.managedKeys.sorted().joined(separator: ", ")))"))
+        }
+        return result(.applied, "turned on \(missing.joined(separator: " and "))")
     }
 
     /// One application-firewall setting: read it, check it still is what the plan saw, change it with

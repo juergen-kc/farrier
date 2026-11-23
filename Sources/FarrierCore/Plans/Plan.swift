@@ -138,6 +138,9 @@ public struct RemediationAction: Sendable, Equatable {
     public let compliantValues: [String]
     /// Payload types whose presence means MDM owns the setting: the helper then refuses to touch it.
     public let managedPayloadTypes: [String]
+    /// Declaration types (Declarative Device Management) that can own the setting. Declarations can't be read yet,
+    /// so the helper refuses these actions on any MDM-enrolled Mac (only MDM can deliver declarations).
+    public let managedDeclarationTypes: [String]
     public let summary: String
     /// Exceptions carry their scope as parameters; everything else is fully described by the action.
     public var takesParameters: Bool { id.hasPrefix("exception.") }
@@ -146,27 +149,44 @@ public struct RemediationAction: Sendable, Equatable {
 public enum RemediationCatalog {
     public static let firewallEnable = RemediationAction(
         id: "firewall.enable", tier: .t4, fact: "firewall.globalState", compliantValues: ["on", "blockAll"],
-        managedPayloadTypes: ["com.apple.security.firewall"],
+        managedPayloadTypes: ["com.apple.security.firewall"], managedDeclarationTypes: [],
         summary: "Turn on the application firewall"
     )
 
     public static let firewallStealthEnable = RemediationAction(
         id: "firewall.stealthEnable", tier: .t4, fact: "firewall.stealthMode", compliantValues: ["on"],
-        managedPayloadTypes: ["com.apple.security.firewall"],
+        managedPayloadTypes: ["com.apple.security.firewall"], managedDeclarationTypes: [],
         summary: "Turn on the firewall's stealth mode (no replies to pings and probes)"
     )
 
     /// Accepting or withdrawing an exception changes what posture reports, so it's approved like a system setting.
     public static let exceptionAdd = RemediationAction(
         id: "exception.add", tier: .t4, fact: "launchd.items", compliantValues: [], managedPayloadTypes: [],
-        summary: "Add a posture exception"
+        managedDeclarationTypes: [], summary: "Add a posture exception"
     )
     public static let exceptionRemove = RemediationAction(
         id: "exception.remove", tier: .t4, fact: "launchd.items", compliantValues: [], managedPayloadTypes: [],
-        summary: "Remove a posture exception"
+        managedDeclarationTypes: [], summary: "Remove a posture exception"
     )
 
-    public static let all: [RemediationAction] = [firewallEnable, firewallStealthEnable, exceptionAdd, exceptionRemove]
+    public static let gatekeeperEnable = RemediationAction(
+        id: "gatekeeper.enable", tier: .t4, fact: "gatekeeper.assessments", compliantValues: ["enabled"],
+        managedPayloadTypes: ["com.apple.systempolicy.control"], managedDeclarationTypes: [],
+        summary: "Turn on Gatekeeper (only run apps from the App Store and identified developers)"
+    )
+
+    /// Sets CriticalUpdateInstall and ConfigDataInstall in /Library/Preferences/com.apple.SoftwareUpdate.plist.
+    public static let securityAutoInstall = RemediationAction(
+        id: "softwareupdate.enableSecurityAutoInstall", tier: .t4, fact: "softwareupdate.prefs", compliantValues: [],
+        managedPayloadTypes: ["com.apple.SoftwareUpdate"],
+        managedDeclarationTypes: ["com.apple.configuration.softwareupdate.settings"],
+        summary: "Install Security Responses and system data files automatically"
+    )
+    /// The keys `securityAutoInstall` sets to true.
+    public static let securityAutoInstallKeys = ["CriticalUpdateInstall", "ConfigDataInstall"]
+
+    public static let all: [RemediationAction] = [firewallEnable, firewallStealthEnable, gatekeeperEnable, securityAutoInstall,
+                                                  exceptionAdd, exceptionRemove]
 
     public static func action(_ id: String) -> RemediationAction? { all.first { $0.id == id } }
 }
@@ -222,7 +242,8 @@ public enum Planner {
                 if finding.managed {
                     reason = "managed by \(finding.managedBy ?? "MDM"): change it in your MDM"
                 } else if finding.managementUnknown {
-                    reason = "MDM profiles could not be checked (the privileged helper is needed), so Farrier won't change it"
+                    reason = "whether MDM manages it could not be checked (profiles need the privileged helper; declarations "
+                        + "can't be read on an MDM-enrolled Mac yet), so Farrier won't change it"
                 } else {
                     reason = "no automatic fix: \(finding.guidance?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "see the rule's guidance")"
                 }

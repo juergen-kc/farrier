@@ -23,6 +23,7 @@ Rules of the road:
 | `gatekeeper.assessments` | `/usr/sbin/spctl --status` | `enabled`, `disabled` |
 | `firewall.globalState` | `/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate` | `off`, `on`, `blockAll` |
 | `mdm.enrollment` | `/usr/bin/profiles status -type enrollment` | `{ dep, mdm, userApproved }` (booleans) |
+| `mdm.declarationTypes` | derived from `mdm.enrollment`: declarations (Declarative Device Management) only come from an MDM server | `[]` on a Mac that isn't MDM-enrolled; left out (`unavailable`) on an enrolled Mac, where reading them isn't supported yet, or when enrollment is unknown |
 | `softwareupdate.prefs` | `/Library/Preferences/com.apple.SoftwareUpdate.plist`, overridden by `/Library/Managed Preferences/com.apple.SoftwareUpdate.plist` | `{ AutomaticCheckEnabled, AutomaticDownload, CriticalUpdateInstall, ConfigDataInstall, AutomaticallyInstallMacOSUpdates, AutomaticallyInstallAppUpdates }`; only the keys that are set |
 | `softwareupdate.managedKeys` | the managed preferences above | the keys a profile sets |
 | `firewall.stealthMode` | `/usr/libexec/ApplicationFirewall/socketfilterfw --getstealthmode` | `on`, `off` |
@@ -72,10 +73,12 @@ in each user's own `TCC.db` and aren't collected yet.
 
 | Fact | Why privileged | Used by |
 |---|---|---|
-| `mdm.declarationTypes` | Declarative Device Management state needs root | managed-setting detection |
+| `mdm.declarationTypes` (enrolled Macs) | Declarative Device Management state needs root | managed-setting detection |
 | `launchd.btm` | apps' embedded launchd jobs and login items (Background Task Management, `sfltool dumpbtm` needs root) | inventory, `posture.core.unsigned-launch-items` |
 
 **Until `mdm.payloadTypes` and `mdm.declarationTypes` are collected** (as valid lists of strings), the posture engine
-can't rule out that a configuration profile owns a setting. That holds even on a Mac that isn't MDM-enrolled, because
-a profile can be installed by hand. So every finding for a rule with `managedBy` is marked `managementUnknown` and is
-**never `fixable`**. `mdm.enrollment` is informational.
+can't rule out that a configuration profile or declaration owns a setting. Profiles can be installed by hand even on a
+Mac that isn't MDM-enrolled, so `mdm.payloadTypes` always needs the helper. Declarations can't: an unenrolled Mac has
+none. So a finding for a rule with `managedBy` is marked `managementUnknown` and is **never `fixable`** when the
+helper isn't available, or, for rules a declaration could manage (such as automatic security updates), on an
+MDM-enrolled Mac. The helper checks enrollment again itself before changing such a setting.
