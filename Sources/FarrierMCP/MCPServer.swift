@@ -82,12 +82,14 @@ public enum ToolCatalog {
 
     public static let tools: [Tool] = [
         Tool(name: "farrier_status", title: "Farrier status",
-             description: "Farrier's version, the privileged helper's state, and whether the approval key is set up. "
+             description: "Farrier's version, the privileged helper's state, whether the approval key is set up, and whether "
+                 + "Farrier.app has Full Disk Access. "
                  + "Use it first when another tool reports the helper or the approval key as missing.",
              inputSchema: schema(), annotations: readOnly("Farrier status")),
         Tool(name: "facts_collect", title: "Collect facts",
              description: "Collect this Mac's facts (OS version, FileVault, SIP, Gatekeeper, firewall, MDM enrollment and "
-                 + "profiles, software update settings) with how each was obtained or why it's missing.",
+                 + "profiles, software update settings, listening ports, launch jobs, and, with Full Disk Access, privacy grants) "
+                 + "with how each was obtained or why it's missing.",
              inputSchema: schema(), annotations: readOnly("Collect facts")),
         Tool(name: "posture_check", title: "Check posture",
              description: "Evaluate the posture rules against this Mac. Each finding has a status (pass, fail, unknown), "
@@ -241,6 +243,8 @@ public struct StatusOutput: Codable {
     public let approvalKeyEnrolled: Bool?
     public let approvalKeyOnThisAccount: Bool?
     public let approvalKeyMatches: Bool?
+    /// Whether Farrier.app has Full Disk Access (nil: unknown). Without it, facts that need it are unavailable.
+    public let fullDiskAccess: Bool?
     public let problems: [String]
 }
 
@@ -251,6 +255,7 @@ enum Status {
         var running: String?
         var enrolled: Bool?
         var matches: Bool?
+        var fda: Bool?
         let local = ApprovalKey.exists
         do {
             let info = try HelperClient.hello()
@@ -261,6 +266,16 @@ enum Status {
             if local, let fp = key.fingerprint, let pub = try? ApprovalKey.publicKey() {
                 matches = FarrierCrypto.sha256(pub).hexString == fp
             }
+            switch try HelperClient.fullDiskAccess() {
+            case .success(let granted):
+                fda = granted
+                if !granted {
+                    problems.append("Farrier.app has no Full Disk Access, so checks that read privacy-protected data are unknown; "
+                                    + "the user runs `farrier helper full-disk-access` in Terminal")
+                }
+            case .failure(let unknown):
+                problems.append("can't tell whether Farrier.app has Full Disk Access: \(unknown.reason)")
+            }
         } catch {
             problems.append("\(error)")
         }
@@ -268,11 +283,13 @@ enum Status {
         if matches == false { problems.append("the helper has a different approval key; the user runs `farrier setup`") }
         return StatusOutput(version: FarrierVersion.string, protocolVersion: HelperConstants.protocolVersion,
                             helper: HelperClient.status, helperRunning: running, approvalKeyEnrolled: enrolled,
-                            approvalKeyOnThisAccount: local, approvalKeyMatches: matches, problems: problems)
+                            approvalKeyOnThisAccount: local, approvalKeyMatches: matches, fullDiskAccess: fda,
+                            problems: problems)
         #else
         return StatusOutput(version: FarrierVersion.string, protocolVersion: HelperConstants.protocolVersion,
                             helper: "unavailable (macOS only)", helperRunning: nil, approvalKeyEnrolled: nil,
-                            approvalKeyOnThisAccount: nil, approvalKeyMatches: nil, problems: ["the helper exists only on macOS"])
+                            approvalKeyOnThisAccount: nil, approvalKeyMatches: nil, fullDiskAccess: nil,
+                            problems: ["the helper exists only on macOS"])
         #endif
     }
 }

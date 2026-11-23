@@ -8,7 +8,7 @@ public enum HelperConstants {
     public static let machService = "dev.farrier.helper"       // launchd label and Mach service
     public static let daemonPlist = "dev.farrier.helper.plist" // Farrier.app/Contents/Library/LaunchDaemons/
     /// Bumped when the XPC protocol changes incompatibly.
-    public static let protocolVersion = 2
+    public static let protocolVersion = 3
     /// What the version handshake compares: the build version AND the protocol, so a protocol change restarts a
     /// running helper even when the version string stays the same (as it does between development builds).
     public static var handshakeVersion: String { "\(FarrierVersion.string)+p\(protocolVersion)" }
@@ -35,6 +35,19 @@ public enum PrivilegedFact: String, CaseIterable, Sendable {
     /// TCP ports listening on non-loopback addresses (`netstat` as root). Since macOS 27, an unprivileged
     /// third-party process sees only its own sockets, so the CLI's own attempt comes back empty.
     case listeningTCP = "network.listeningTCP"
+    /// Whether Farrier.app has Full Disk Access (the helper opens a file only that grant allows).
+    case fullDiskAccess = "helper.fullDiskAccess"
+    /// Allowed grants for the most far-reaching privacy services, from the system TCC.db (`PrivacyGrants`).
+    case tccGrants = "tcc.grants"
+
+    /// Facts the helper can only read with Full Disk Access. Without it they're reported as missing for that
+    /// reason (never as an empty value), so rules that use them come out unknown rather than passed.
+    public var needsFullDiskAccess: Bool {
+        switch self {
+        case .tccGrants: return true
+        case .mdmPayloadTypes, .listeningTCP, .fullDiskAccess: return false
+        }
+    }
 }
 
 // MARK: - Wire format (JSON over XPC)
@@ -78,11 +91,14 @@ public struct PrivilegedReply: Codable, Sendable {
     public let value: FactValue?
     /// Set when the helper refused (unknown fact, wrong session) or the read failed.
     public let error: String?
+    /// True when the fact needs Full Disk Access and Farrier.app doesn't have it (`error` says so too).
+    public let needsFullDiskAccess: Bool?
 
-    public init(fact: String, value: FactValue?, error: String?) {
+    public init(fact: String, value: FactValue?, error: String?, needsFullDiskAccess: Bool? = nil) {
         self.fact = fact
         self.value = value
         self.error = error
+        self.needsFullDiskAccess = needsFullDiskAccess
     }
 }
 

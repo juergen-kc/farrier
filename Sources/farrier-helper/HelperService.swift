@@ -2,6 +2,7 @@
 import FarrierCore
 import FarrierHelperKit
 import Foundation
+import SQLite3
 
 func helperLog(_ message: String) {
     FileHandle.standardError.write(Data("\(ISO8601DateFormatter().string(from: Date())) \(message)\n".utf8))
@@ -95,6 +96,10 @@ final class HelperService: NSObject, FarrierHelperProtocol {
         }
         guard let known = PrivilegedFact(rawValue: fact) else {
             return reply(HelperWire.encode(PrivilegedReply(fact: fact, value: nil, error: "not an allowed fact")))
+        }
+        if known.needsFullDiskAccess, PrivilegedFacts.fullDiskAccess() == .denied {
+            return reply(HelperWire.encode(PrivilegedReply(fact: fact, value: nil, error: FullDiskAccess.missingHint,
+                                                            needsFullDiskAccess: true)))
         }
         let (value, error) = PrivilegedFacts.read(known)
         reply(HelperWire.encode(PrivilegedReply(fact: fact, value: value, error: error)))
@@ -274,7 +279,55 @@ enum PrivilegedFacts {
             if let value = Parsers.listeningTCPPorts(result.stdout) { return (value, nil) }
             let snippet = result.combined.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160)
             return (nil, "unrecognised netstat output (exit \(result.status)): \(snippet)")
+        case .fullDiskAccess:
+            switch fullDiskAccess() {
+            case .granted: return (.bool(true), nil)
+            case .denied: return (.bool(false), nil)
+            case .undetermined(let reason): return (nil, reason)
+            }
+        case .tccGrants:
+            return TCCDatabase.grants(path: FullDiskAccess.probePaths[0])
         }
+    }
+
+    /// Opens (never reads) a file only Full Disk Access allows, as root.
+    static func fullDiskAccess() -> FullDiskAccess.ProbeResult {
+        FullDiskAccess.probe { path in
+            let fd = open(path, O_RDONLY)
+            if fd < 0 { return errno }
+            close(fd)
+            return 0
+        }
+    }
+}
+
+/// The system TCC.db, read-only, through SQLite. Only the columns `PrivacyGrants` needs, only its services.
+enum TCCDatabase {
+    static func grants(path: String) -> (FactValue?, String?) {
+        var db: OpaquePointer?
+        defer { sqlite3_close(db) }
+        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            return (nil, "can't open the TCC database: \(String(cString: sqlite3_errmsg(db)))")
+        }
+        sqlite3_busy_timeout(db, 2000)
+        // The service names are Farrier's own constants, not input.
+        let list = PrivacyGrants.services.keys.sorted().map { "'\($0)'" }.joined(separator: ",")
+        let sql = "SELECT service, client, client_type, auth_value FROM access WHERE service IN (\(list))"
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return (nil, "unrecognised TCC database layout: \(String(cString: sqlite3_errmsg(db)))")
+        }
+        var rows: [PrivacyGrants.Row] = []
+        while true {
+            let step = sqlite3_step(stmt)
+            if step == SQLITE_DONE { break }
+            guard step == SQLITE_ROW else { return (nil, "reading the TCC database failed: \(String(cString: sqlite3_errmsg(db)))") }
+            func text(_ i: Int32) -> String { sqlite3_column_text(stmt, i).map { String(cString: $0) } ?? "" }
+            rows.append(PrivacyGrants.Row(service: text(0), client: text(1), clientType: Int(sqlite3_column_int(stmt, 2)),
+                                          authValue: Int(sqlite3_column_int(stmt, 3))))
+        }
+        return (PrivacyGrants.fact(rows), nil)
     }
 }
 #endif

@@ -4,7 +4,7 @@
 #   sudo ./scripts/uninstall.sh [--purge]
 #
 # Always: unregisters the helper, deletes the approval key (the user's keychain item and the enrolled public key),
-# removes the helper's authorization right, the app, the `farrier` wrapper and the helper's log.
+# removes the helper's authorization right and Full Disk Access grant, the app, the `farrier` wrapper and the helper's log.
 # --purge also removes the journals, saved plans and posture exceptions. Without it they stay, so a reinstall
 # keeps its history and exceptions.
 set -euo pipefail
@@ -48,6 +48,8 @@ WRAPPERS=(/opt/homebrew/bin/farrier /usr/local/bin/farrier)
 [[ -f "$STATE/wrapper-path" ]] && WRAPPERS+=("$(head -n 1 "$STATE/wrapper-path")")
 rm -f "$STATE/wrapper-path"
 security authorizationdb remove dev.farrier.enroll-approval-key >/dev/null 2>&1 || true
+# The Full Disk Access grant (System Settings keeps the entry otherwise, pointing at a removed app).
+tccutil reset SystemPolicyAllFiles dev.farrier.app >/dev/null 2>&1 || true
 if [[ -n "$PURGE" ]]; then
   rm -rf "$STATE"
 else

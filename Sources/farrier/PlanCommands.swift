@@ -31,6 +31,10 @@ struct Setup: ParsableCommand {
             let report = try ApprovalSetup.run(rotate: rotate)
             for step in report.steps { print("- \(step)") }
             print("approval key ready: \(report.fingerprint.map { String($0.prefix(16)) + "…" } ?? "?")")
+            // Not part of the key, but the last step of onboarding: say if it's missing, and how to fix it.
+            if case .success(false)? = try? HelperClient.fullDiskAccess() {
+                print("next: give Farrier.app Full Disk Access, for the checks that read privacy-protected data: `farrier helper full-disk-access`")
+            }
         } catch {
             note("setup failed: \(error)")
             throw ExitCode(1)

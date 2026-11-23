@@ -186,7 +186,7 @@ struct Facts: ParsableCommand {
 struct Helper: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Manage and check the privileged helper (macOS, from Farrier.app only).",
-        subcommands: [Status.self, Register.self, Unregister.self, Ping.self, WhoAmI.self]
+        subcommands: [Status.self, Register.self, Unregister.self, FullDiskAccessCommand.self, Ping.self, WhoAmI.self]
     )
 
     static func macOnly() throws {
@@ -197,11 +197,13 @@ struct Helper: ParsableCommand {
     }
 
     struct Status: ParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Show the helper's registration status.")
+        static let configuration = CommandConfiguration(abstract: "Show the helper's registration status, and whether it has Full Disk Access.")
         func run() throws {
             try Helper.macOnly()
             #if os(macOS)
             print("helper: \(HelperClient.status)")
+            guard HelperClient.status == "enabled" else { return }
+            print("full disk access: \(FullDiskAccessCommand.describe())")
             #endif
         }
     }
@@ -226,6 +228,99 @@ struct Helper: ParsableCommand {
             let (status, message) = HelperClient.unregister()
             print("helper: \(status)")
             if let message { print(message) }
+            #endif
+        }
+    }
+
+    struct FullDiskAccessCommand: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "full-disk-access",
+            abstract: "Check that Farrier.app has Full Disk Access, and help you grant it if not.",
+            discussion: """
+            Some checks read privacy-protected data (for example which apps hold privacy grants). Only Farrier's \
+            root helper reads it, and only with Full Disk Access granted to Farrier.app; your terminal or AI client \
+            never gets that access. Without it, those checks report "unknown" rather than pass or fail.
+
+            If the access is missing, this opens System Settings → Privacy & Security → Full Disk Access, shows \
+            Farrier.app in the Finder, and waits until you've turned it on.
+            """
+        )
+
+        @Flag(help: "Only check; don't open System Settings or wait.")
+        var check = false
+
+        @Option(help: "How long to wait for the grant, in seconds.")
+        var timeout: Int = 300
+
+        /// One line for `helper status`.
+        static func describe() -> String {
+            #if os(macOS)
+            do {
+                switch try HelperClient.fullDiskAccess() {
+                case .success(true): return "granted"
+                case .success(false): return "not granted (run `farrier helper full-disk-access`)"
+                case .failure(let unknown): return "unknown (\(unknown.reason))"
+                }
+            } catch {
+                return "unknown (\(error))"
+            }
+            #else
+            return "unknown (macOS only)"
+            #endif
+        }
+
+        func run() throws {
+            try Helper.macOnly()
+            #if os(macOS)
+            let granted: Bool
+            do {
+                try HelperClient.ensureCurrent()
+                switch try HelperClient.fullDiskAccess() {
+                case .success(let g): granted = g
+                case .failure(let unknown):
+                    note("can't tell whether Farrier.app has Full Disk Access: \(unknown.reason)")
+                    throw ExitCode(1)
+                }
+            } catch let exit as ExitCode {
+                throw exit
+            } catch {
+                note("\(error)")
+                throw ExitCode(1)
+            }
+            if granted {
+                print("Full Disk Access: granted to Farrier.app")
+                return
+            }
+            print("Full Disk Access: not granted to Farrier.app")
+            if check { throw ExitCode(1) }
+
+            let app = Bundle.main.bundlePath
+            print("""
+
+            To grant it:
+              1. In System Settings → Privacy & Security → Full Disk Access (opening now), click +.
+              2. Choose Farrier.app (\(app); a Finder window shows it), or drag it from the Finder into the list.
+              3. Make sure the switch next to Farrier is on.
+
+            Only Farrier's root helper uses this access; the terminal or AI client running farrier doesn't get it.
+            Waiting up to \(timeout) s (Ctrl-C to stop; run this again later to check)…
+            """)
+            _ = ProcessRunner().run("/usr/bin/open", [FullDiskAccess.settingsURL], timeout: 10)
+            _ = ProcessRunner().run("/usr/bin/open", ["-R", app], timeout: 10)
+
+            let deadline = Date().addingTimeInterval(TimeInterval(max(timeout, 0)))
+            while Date() < deadline {
+                Thread.sleep(forTimeInterval: 2)
+                // Each check is bounded by the time left, so a helper that stalls can't outlast --timeout.
+                let left = deadline.timeIntervalSinceNow
+                guard left > 0 else { break }
+                if case .success(true)? = try? HelperClient.fullDiskAccess(timeout: min(left, 10)) {
+                    print("Full Disk Access: granted to Farrier.app")
+                    return
+                }
+            }
+            note("still not granted after \(timeout) s; run `farrier helper full-disk-access` again once you've turned it on")
+            throw ExitCode(1)
             #endif
         }
     }

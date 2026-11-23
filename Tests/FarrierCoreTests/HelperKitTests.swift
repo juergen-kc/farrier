@@ -28,6 +28,8 @@ struct HelperKitTests {
     @Test func privilegedFactsAreAnAllowlist() {
         #expect(PrivilegedFact(rawValue: "mdm.payloadTypes") == .mdmPayloadTypes)
         #expect(PrivilegedFact(rawValue: "network.listeningTCP") == .listeningTCP)
+        #expect(PrivilegedFact(rawValue: "helper.fullDiskAccess") == .fullDiskAccess)
+        #expect(PrivilegedFact(rawValue: "tcc.grants") == .tccGrants)
         #expect(PrivilegedFact(rawValue: "/etc/master.passwd") == nil)
         #expect(PrivilegedFact(rawValue: "../mdm.payloadTypes") == nil)
     }
@@ -38,5 +40,17 @@ struct HelperKitTests {
         #expect(back.fact == reply.fact)
         #expect(back.value == reply.value)
         #expect(HelperWire.decode(HelperInfo.self, Data("not json".utf8)) == nil)
+    }
+
+    @Test func onlyPrivacyDataNeedsFullDiskAccess() {
+        #expect(PrivilegedFact.allCases.filter(\.needsFullDiskAccess) == [.tccGrants])
+    }
+
+    @Test func olderRepliesWithoutTheFullDiskAccessFieldStillDecode() throws {
+        let old = Data(#"{"fact":"tcc.grants","error":"boom"}"#.utf8)
+        let reply = try #require(HelperWire.decode(PrivilegedReply.self, old))
+        #expect(reply.needsFullDiskAccess == nil)
+        let missing = PrivilegedReply(fact: "tcc.grants", value: nil, error: FullDiskAccess.missingHint, needsFullDiskAccess: true)
+        #expect(HelperWire.decode(PrivilegedReply.self, HelperWire.encode(missing))?.needsFullDiskAccess == true)
     }
 }

@@ -95,12 +95,21 @@ Done:
       shows an unprivileged third-party process only its own sockets; Remote Login, Remote Management and Screen
       Sharing fail as they should on that VM.
 
+- [x] Full Disk Access onboarding: the helper checks the grant (it opens a file only Full Disk Access allows),
+      `farrier helper full-disk-access` opens the right Settings pane, shows the app and waits for the grant;
+      `helper status`, `setup` and the MCP `farrier_status` report it; the first fact that needs it, `tcc.grants`
+      (system TCC.db), is reported as missing for that reason, so rules on it are unknown; uninstall resets the
+      grant. **Validated** on the macOS 27.2.1 VM: without the grant, `helper.fullDiskAccess = false` and `tcc.grants`
+      unavailable with the hint; the command opened Settings and the Finder, and reported "granted" as soon as the
+      switch was on; `tcc.grants` then listed 19 grants; turning the switch off was seen at once (`--check` exit 1).
+      The running helper picks up both changes without a restart.
+
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
   Developer ID signing
-- Homebrew cask: the template (`Packaging/homebrew/farrier.rb`) is rendered per release; it still needs a tap
-  repository and a first real (notarized) release to be tested
-- Full Disk Access onboarding: detect via the helper, open the right Settings pane, and report "unknown" without it
+- Homebrew cask: the tap ([juergen-kc/homebrew-farrier](https://github.com/juergen-kc/homebrew-farrier), with
+  `brew style`/`brew audit` CI) exists and the release workflow commits each release's cask to it; it still needs a
+  first real (notarized) release to be tested
 - MCP: progress notifications for long calls; resources (`farrier://plan/{id}`, `farrier://journal/recent`); the
   other runbook prompts; validation with Claude Desktop
 - More fixes in the remediation catalog: Gatekeeper, automatic security updates

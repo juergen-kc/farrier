@@ -58,6 +58,15 @@ caller is in the console session. Otherwise `farrier facts` lists them as `unava
 |---|---|---|
 | `network.listeningTCP` | `/usr/sbin/netstat -anp tcp` as root (see the T0 table) | as above |
 | `mdm.payloadTypes` | `/usr/bin/profiles show -output stdout-xml` | sorted, unique `PayloadType`s of the computer-level profiles; `[]` when none are installed |
+| `helper.fullDiskAccess` | opens (doesn't read) the system `TCC.db`, or `com.apple.TimeMachine.plist` if that's missing: only Full Disk Access allows it, even for root | `true` / `false`; missing (with the reason) if neither file exists or the error is unexpected |
+| `tcc.grants` | the system `TCC.db` (`/Library/Application Support/com.apple.TCC/TCC.db`), read-only with SQLite; **needs Full Disk Access** | allowed grants for Full Disk Access, Accessibility, Screen Recording, Input Monitoring, sending events, Endpoint Security and Developer Tools: `[{service, client, clientType}]` (`service` is `fullDiskAccess`, `accessibility`, `screenRecording`, `inputMonitoring`, `postEvents`, `endpointSecurity` or `developerTools`; `clientType` is `bundle` or `path`), sorted |
+
+**Full Disk Access.** Granted to `Farrier.app`, it covers only the helper (never the terminal or AI client that runs
+`farrier`). Without it, facts that need it are `unavailable` with "Farrier.app doesn't have Full Disk Access", not
+empty, so rules that use them come out **unknown**. `farrier helper full-disk-access` checks the grant, opens System
+Settings → Privacy & Security → Full Disk Access, shows `Farrier.app` in the Finder and waits until the grant is on;
+`farrier helper status` and the MCP `farrier_status` tool show it too. Per-user grants (camera, microphone, …) are
+in each user's own `TCC.db` and aren't collected yet.
 
 ### Planned
 
@@ -65,7 +74,6 @@ caller is in the console session. Otherwise `farrier facts` lists them as `unava
 |---|---|---|
 | `mdm.declarationTypes` | Declarative Device Management state needs root | managed-setting detection |
 | `launchd.btm` | apps' embedded launchd jobs and login items (Background Task Management, `sfltool dumpbtm` needs root) | inventory, `posture.core.unsigned-launch-items` |
-| `tcc.grants` | `TCC.db` needs Full Disk Access | inventory, posture |
 
 **Until `mdm.payloadTypes` and `mdm.declarationTypes` are collected** (as valid lists of strings), the posture engine
 can't rule out that a configuration profile owns a setting. That holds even on a Mac that isn't MDM-enrolled, because

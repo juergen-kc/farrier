@@ -93,8 +93,16 @@ farrier helper register
 `sudo /Applications/Farrier.app/Contents/Resources/uninstall.sh` (add `--purge` to also delete the journals,
 plans and exceptions).
 
-`farrier facts` and `farrier posture` read this Mac's settings without privileges. Facts that need the helper show
-as unknown for now (see [docs/FACTS.md](docs/FACTS.md)). On Linux, or to test rules, use
+Then give `Farrier.app` Full Disk Access, for the checks that read privacy-protected data (only the root helper
+uses it, not your terminal); this opens the right System Settings pane and waits until it's on:
+
+```bash
+farrier helper full-disk-access
+```
+
+`farrier facts` and `farrier posture` read this Mac's settings; facts that need the helper or Full Disk Access come
+from the helper, and are reported as unavailable, with the reason, when it can't read them (see
+[docs/FACTS.md](docs/FACTS.md)). On Linux, or to test rules, use
 `swift run farrier posture --facts examples/facts-sample.json`.
 
 **Fixing a finding** (so far: the application firewall) is plan → approve → apply. Set up the approval key once
