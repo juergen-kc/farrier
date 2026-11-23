@@ -46,6 +46,11 @@ public enum HelperUnavailable: Error, CustomStringConvertible {
     }
 }
 
+public struct FullDiskAccessUnknown: Error, CustomStringConvertible {
+    public let reason: String
+    public var description: String { reason }
+}
+
 /// Registration of the LaunchDaemon (SMAppService) and calls to it over XPC, with the helper's signature pinned.
 public enum HelperClient {
     static var service: SMAppService { SMAppService.daemon(plistName: HelperConstants.daemonPlist) }
@@ -148,6 +153,13 @@ public enum HelperClient {
         return reply
     }
 
+    /// Whether Farrier.app has Full Disk Access: true or false, or why the helper couldn't tell.
+    public static func fullDiskAccess() throws -> Result<Bool, FullDiskAccessUnknown> {
+        let reply = try readPrivileged(.fullDiskAccess)
+        if case .bool(let granted)? = reply.value { return .success(granted) }
+        return .failure(FullDiskAccessUnknown(reason: reply.error ?? "no answer"))
+    }
+
     /// T1 facts for `farrier facts` / `farrier posture`, with a note for each. Never throws: a helper that isn't
     /// available just makes those facts unavailable (and the posture engine treats them as unknown).
     public static func collectPrivilegedFacts() -> CollectionResult {
@@ -159,6 +171,9 @@ public enum HelperClient {
                 if let value = reply.value {
                     facts[fact.rawValue] = value
                     notes.append(CollectionNote(fact: fact.rawValue, status: .collected, source: "helper", detail: nil))
+                } else if reply.needsFullDiskAccess == true {
+                    // Not a failure: the grant is missing, and the user can give it.
+                    notes.append(CollectionNote(fact: fact.rawValue, status: .unavailable, source: "helper", detail: FullDiskAccess.missingHint))
                 } else {
                     notes.append(CollectionNote(fact: fact.rawValue, status: .failed, source: "helper", detail: reply.error))
                 }
