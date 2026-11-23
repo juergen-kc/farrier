@@ -84,7 +84,7 @@ public struct InventoryCollector: Sendable {
             if let data = readFile("\(path)/Contents/Info.plist"), let info = Parsers.propertyList(data)?.object {
                 o["name"] = .string(info["CFBundleDisplayName"]?.string ?? info["CFBundleName"]?.string ?? fallback)
                 if let id = info["CFBundleIdentifier"]?.string { o["bundleID"] = .string(id) }
-                if let v = info["CFBundleShortVersionString"]?.string { o["version"] = .string(v) }
+                if let v = info["CFBundleShortVersionString"]?.string, !v.isEmpty { o["version"] = .string(v) }
             } else {
                 o["name"] = .string(fallback)
                 o["error"] = .string("cannot read Info.plist")
@@ -187,6 +187,7 @@ public enum Inventory {
             if let id = s("bundleID") { parts.append("(\(id))") }
             var line = parts.joined(separator: " ")
             if let signer { line += " — \(signer)" }
+            if let reason = sig?["error"]?.string, sig?["gatekeeperAccepted"] != .bool(true) { line += " (\(reason))" }
             if let e = s("error") { line += " — \(e)" }
             return line
         case "launchItems":

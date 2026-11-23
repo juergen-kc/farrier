@@ -131,6 +131,15 @@ Done:
       second, older undo plan for the same change came back `alreadyCompliant` ("already undone") with nothing
       changed, and a plan applied by the previous version was refused for lack of a recorded state.
 
+- [x] `farrier inventory` and the MCP `inventory` tool: installed apps and launch jobs with signing and notarization
+      status (flagged when they need a look), system extensions, profiles, privacy grants, admins, listening ports.
+      Signatures get Gatekeeper's second opinion (`spctl`) when the offline checks say no, and development
+      certificates are told apart from Developer ID. **Validated** on a GitHub macOS runner (23 apps; the flags match
+      `spctl` exactly) and on the macOS 27.2.1 VM (14 apps: the Apple Development–signed Farrier builds, Chrome's ad
+      hoc web-app shims and an invalid URL handler flagged; Parallels' launch jobs flagged; admins and ports listed;
+      privacy grants pointing to Full Disk Access). Still open: login items and background tasks (helper,
+      `sfltool dumpbtm`)
+
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
   Developer ID signing
@@ -140,10 +149,6 @@ To do:
 - MCP: progress notifications for long calls; resources (`farrier://plan/{id}`, `farrier://journal/recent`); the
   other runbook prompts; validation with Claude Desktop
 - `posture.core` pack: about 25 high-value checks with mSCP mappings
-- `inventory`: **written, not yet validated on the VM.** `farrier inventory` and the MCP `inventory` tool: installed
-  apps and launch jobs with signing and notarization status (flagged when they need a look), system extensions,
-  profiles, privacy grants, admins, listening ports. Still open: login items and background tasks (helper,
-  `sfltool dumpbtm`)
 - `--json` everywhere in the CLI
 - `--redact`
 

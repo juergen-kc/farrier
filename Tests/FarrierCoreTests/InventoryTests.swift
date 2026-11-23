@@ -93,6 +93,11 @@ struct InventoryTests {
         #expect(section("loginItems")?.note?.contains("Background Task Management") == true)
         #expect(Inventory.describe(facts["apps.installed"]!.array![1], section: "apps") == "X — Unnotarized Developer ID, team 4C6364ACXT")
         #expect(Inventory.describe(.string("root"), section: "admins") == "root")
+        let dev = CodeSignatureInfo(valid: true, notarized: false, teamID: "E89Q3796E9", developerID: false)
+        #expect(dev.source == "Development-signed")
+        let broken = CodeSignatureInfo(valid: false, notarized: false, error: "a sealed resource is missing or invalid").factValue
+        #expect(Inventory.describe(.object(["path": .string("/A.app"), "name": .string("A"), "signature": broken]), section: "apps")
+                == "A — Invalid signature (a sealed resource is missing or invalid)")
         #expect(Inventory.describe(.int(22), section: "listeningPorts") == "22")
         let flagged = Inventory.build(facts: facts, notes: notes, only: ["apps"], flaggedOnly: true)
         #expect(flagged.sections.map(\.id) == ["apps"])

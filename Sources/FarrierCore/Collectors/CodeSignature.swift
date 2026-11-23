@@ -21,9 +21,13 @@ public struct CodeSignatureInfo: Sendable, Equatable {
     public var gatekeeperAccepted: Bool?
     /// Gatekeeper's source, e.g. "Notarized Developer ID", "no usable signature".
     public var gatekeeperSource: String?
+    /// Signed with a Developer ID certificate (for distribution). False for development certificates (Apple
+    /// Development), which Gatekeeper never accepts on other Macs. Nil if not checked.
+    public var developerID: Bool?
 
     public init(valid: Bool, notarized: Bool?, appleSigned: Bool = false, adhoc: Bool = false, teamID: String? = nil,
-                identifier: String? = nil, error: String? = nil, gatekeeperAccepted: Bool? = nil, gatekeeperSource: String? = nil) {
+                identifier: String? = nil, error: String? = nil, gatekeeperAccepted: Bool? = nil, gatekeeperSource: String? = nil,
+                developerID: Bool? = nil) {
         self.valid = valid
         self.notarized = notarized
         self.appleSigned = appleSigned
@@ -33,6 +37,7 @@ public struct CodeSignatureInfo: Sendable, Equatable {
         self.error = error
         self.gatekeeperAccepted = gatekeeperAccepted
         self.gatekeeperSource = gatekeeperSource
+        self.developerID = developerID
     }
 
     public var factValue: FactValue {
@@ -43,6 +48,7 @@ public struct CodeSignatureInfo: Sendable, Equatable {
         if let error { o["error"] = .string(error) }
         if let gatekeeperAccepted { o["gatekeeperAccepted"] = .bool(gatekeeperAccepted) }
         if let gatekeeperSource { o["gatekeeperSource"] = .string(gatekeeperSource) }
+        if let developerID { o["developerID"] = .bool(developerID) }
         o["source"] = .string(source)
         return .object(o)
     }
@@ -59,6 +65,7 @@ public struct CodeSignatureInfo: Sendable, Equatable {
         if appleSigned { return "Apple" }
         if adhoc { return "Ad hoc" }
         if teamID == nil { return "Unknown signer" }
+        if developerID == false && notarized != true { return "Development-signed" }
         switch notarized {
         case true?: return "Notarized Developer ID"
         case false?: return "Unnotarized Developer ID"
@@ -122,6 +129,10 @@ public struct SecurityFrameworkSignatures: CodeSignatureChecking {
         var result = CodeSignatureInfo(valid: true, notarized: notarized, appleSigned: apple, adhoc: adhoc,
                                       teamID: dict[kSecCodeInfoTeamIdentifier as String] as? String,
                                       identifier: dict[kSecCodeInfoIdentifier as String] as? String)
+        if result.teamID != nil && !apple {
+            // Developer ID Application certificates carry this extension; development certificates don't.
+            result.developerID = satisfies(code, "anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists")
+        }
         // The "notarized" requirement only sees stapled or cached tickets; Gatekeeper also asks Apple.
         if !notarized && !adhoc, let (accepted, source) = assess(path) {
             result.gatekeeperAccepted = accepted
