@@ -79,6 +79,12 @@ jobs:
           PY
       - name: Live posture on the runner
         run: swift run farrier posture
+      # Apps with their signatures, system extensions, admins: the parts only the inventory collects.
+      - name: Live inventory on the runner
+        run: |
+          swift run farrier inventory --section apps --section systemExtensions --section admins
+          swift run farrier inventory --json > inventory.json
+          python3 -c 'import json; s={x["id"]: x for x in json.load(open("inventory.json"))["sections"]}; assert s["apps"]["available"] and s["apps"]["items"], s["apps"]; assert s["admins"]["available"], s["admins"]; print("apps:", len(s["apps"]["items"]), "flagged:", s["apps"]["flagged"])'
       # Without the helper, MDM profiles can't be checked, so nothing may be planned (the firewall is left out).
       - name: Plan on the runner (no helper)
         run: swift run farrier plan posture
