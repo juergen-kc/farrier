@@ -137,11 +137,38 @@ public struct SystemCollectors: Sendable {
         }
 
         collectSoftwareUpdate(into: &facts, notes: &notes)
+        collectDeclarationTypes(into: &facts, notes: &notes)
 
         let launch = LaunchItemsCollector(fileExists: fileExists, readFile: readFile, signatures: signatures).collect()
         if let value = launch.value { facts[LaunchItemsCollector.fact] = value }
         notes.append(launch.note)
         return CollectionResult(facts: facts, notes: notes)
+    }
+
+    /// Declarative Device Management declarations only ever come from an MDM server, so a Mac that isn't
+    /// MDM-enrolled has none: `[]`. On an enrolled Mac they can't be read yet, so the fact is left out, and rules a
+    /// declaration could manage stay "management unknown" (never fixed).
+    func collectDeclarationTypes(into facts: inout [String: FactValue], notes: inout [CollectionNote]) {
+        let fact = CoreFacts.declarationTypes
+        let source = CoreFacts.enrollment
+        switch facts[CoreFacts.enrollment]?.object?["mdm"] {
+        case .bool(false)?:
+            facts[fact] = .array([])
+            notes.append(CollectionNote(fact: fact, status: .collected, source: source, detail: "not MDM-enrolled, so no declarations"))
+        case .bool(true)?:
+            notes.append(CollectionNote(fact: fact, status: .unavailable, source: source,
+                                        detail: "MDM-enrolled: reading declarations isn't supported yet"))
+        default:
+            notes.append(CollectionNote(fact: fact, status: .unavailable, source: source, detail: "MDM enrollment is unknown"))
+        }
+    }
+
+    /// `softwareupdate.prefs` alone (the helper re-reads it before and after changing it). Nil if it can't be read.
+    public func softwareUpdatePrefs() -> FactValue? {
+        var facts: [String: FactValue] = [:]
+        var notes: [CollectionNote] = []
+        collectSoftwareUpdate(into: &facts, notes: &notes)
+        return facts["softwareupdate.prefs"]
     }
 
     func collectSoftwareUpdate(into facts: inout [String: FactValue], notes: inout [CollectionNote]) {

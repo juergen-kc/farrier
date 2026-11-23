@@ -112,7 +112,10 @@ To do:
   first real (notarized) release to be tested
 - MCP: progress notifications for long calls; resources (`farrier://plan/{id}`, `farrier://journal/recent`); the
   other runbook prompts; validation with Claude Desktop
-- More fixes in the remediation catalog: Gatekeeper, automatic security updates
+- More fixes in the remediation catalog: Gatekeeper (`gatekeeper.enable`) and automatic security updates
+  (`softwareupdate.enableSecurityAutoInstall`). **Written, not yet validated on the VM.** `mdm.declarationTypes` is
+  now `[]` on a Mac that isn't MDM-enrolled, so the update fix can be planned there; on enrolled Macs it isn't, and
+  the helper re-checks enrollment before changing it
 - Undo for T4 changes (record the previous state, plan the reverse change)
 - `posture.core` pack: about 25 high-value checks with mSCP mappings
 - Managed-device detection (`managed` findings are not fixable locally)
