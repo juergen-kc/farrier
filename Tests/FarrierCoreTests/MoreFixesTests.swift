@@ -76,4 +76,22 @@ struct MoreFixesTests {
         let unknown = collect("something new")
         #expect(unknown.facts["mdm.declarationTypes"] == nil)
     }
+
+    @Test func softwareUpdateSettingsReportManagedOverrides() throws {
+        func plist(_ d: [String: Bool]) -> Data {
+            try! PropertyListSerialization.data(fromPropertyList: d, format: .xml, options: 0)
+        }
+        let files: [String: Data] = [
+            "/Library/Preferences/com.apple.SoftwareUpdate.plist": plist(["CriticalUpdateInstall": true, "ConfigDataInstall": true]),
+            // A custom-settings profile forcing one key off: the managed value is the effective one.
+            "/Library/Managed Preferences/com.apple.SoftwareUpdate.plist": plist(["CriticalUpdateInstall": false]),
+        ]
+        let collector = SystemCollectors(runner: RecordedRunner([:]), readFile: { files[$0] }, fileExists: { files[$0] != nil })
+        let settings = try #require(collector.softwareUpdateSettings())
+        #expect(settings.prefs["CriticalUpdateInstall"] == .bool(false))
+        #expect(settings.prefs["ConfigDataInstall"] == .bool(true))
+        #expect(settings.managedKeys == ["CriticalUpdateInstall"])
+        let none = SystemCollectors(runner: RecordedRunner([:]), readFile: { _ in nil }, fileExists: { _ in false })
+        #expect(none.softwareUpdateSettings() == nil)
+    }
 }

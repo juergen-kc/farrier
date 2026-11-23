@@ -163,12 +163,15 @@ public struct SystemCollectors: Sendable {
         }
     }
 
-    /// `softwareupdate.prefs` alone (the helper re-reads it before and after changing it). Nil if it can't be read.
-    public func softwareUpdatePrefs() -> FactValue? {
+    /// The effective software update settings and the keys a profile manages (the helper re-reads them before and
+    /// after changing them). Nil if they can't be read.
+    public func softwareUpdateSettings() -> (prefs: [String: FactValue], managedKeys: Set<String>)? {
         var facts: [String: FactValue] = [:]
         var notes: [CollectionNote] = []
         collectSoftwareUpdate(into: &facts, notes: &notes)
-        return facts["softwareupdate.prefs"]
+        guard let prefs = facts["softwareupdate.prefs"]?.object else { return nil }
+        let managed = Set((facts["softwareupdate.managedKeys"]?.array ?? []).compactMap(\.string))
+        return (prefs, managed)
     }
 
     func collectSoftwareUpdate(into facts: inout [String: FactValue], notes: inout [CollectionNote]) {

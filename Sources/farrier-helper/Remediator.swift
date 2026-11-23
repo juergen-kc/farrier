@@ -128,8 +128,15 @@ enum Remediator {
     private static func setSecurityAutoInstall(_ item: PlanItem, _ runner: CommandRunning,
                                                _ result: (ItemResult.Outcome, String?) -> ItemResult) -> ItemResult {
         let keys = RemediationCatalog.securityAutoInstallKeys
-        guard let before = SystemCollectors(runner: runner).softwareUpdatePrefs()?.object else {
+        let collector = SystemCollectors(runner: runner)
+        guard let (before, managedKeys) = collector.softwareUpdateSettings() else {
             return result(.failed, "could not read the software update settings")
+        }
+        // Any profile can set these keys as managed preferences (a custom-settings payload, not only
+        // com.apple.SoftwareUpdate). The managed value wins, so a local change would do nothing.
+        let managed = keys.filter(managedKeys.contains)
+        if !managed.isEmpty {
+            return result(.refused, "managed by a profile (\(managed.joined(separator: ", "))); change it in the profile or MDM")
         }
         let missing = keys.filter { before[$0] != .bool(true) }
         if missing.isEmpty { return result(.alreadyCompliant, "\(keys.joined(separator: " and ")) are already on") }
@@ -148,6 +155,15 @@ enum Remediator {
                 return result(.failed, "could not set \(key): \(r.combined.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))")
             }
             guard readBack(key) else { return result(.failed, "\(key) is still not on after setting it") }
+        }
+        // The effective settings, as posture reads them (managed preferences included), must now be on too.
+        guard let after = collector.softwareUpdateSettings() else {
+            return result(.failed, "could not read the software update settings afterwards")
+        }
+        let stillOff = keys.filter { after.prefs[$0] != .bool(true) }
+        guard stillOff.isEmpty else {
+            return result(.failed, "\(stillOff.joined(separator: " and ")) still reads as off"
+                          + (after.managedKeys.isEmpty ? "" : " (managed keys: \(after.managedKeys.sorted().joined(separator: ", ")))"))
         }
         return result(.applied, "turned on \(missing.joined(separator: " and "))")
     }
