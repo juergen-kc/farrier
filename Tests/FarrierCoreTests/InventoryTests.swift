@@ -99,6 +99,17 @@ struct InventoryTests {
         #expect(flagged.sections.first?.items.count == 1)
     }
 
+    @Test func spctlAssessmentParser() throws {
+        let edge = "/Applications/Microsoft Edge.app"
+        let ok = try #require(Parsers.spctlAssessment("\(edge): accepted\nsource=Notarized Developer ID\norigin=Developer ID Application: Microsoft Corporation (UBF8T346G9)\n", path: edge))
+        #expect(ok.accepted && ok.source == "Notarized Developer ID")
+        let no = try #require(Parsers.spctlAssessment("/Applications/PowerShell.app: rejected\nsource=no usable signature\n", path: "/Applications/PowerShell.app"))
+        #expect(!no.accepted && no.source == "no usable signature")
+        #expect(Parsers.spctlAssessment("/Applications/X.app: a sealed resource is missing or invalid\n", path: "/Applications/X.app") == nil)
+        // The verdict must be for this path, not a lookalike line.
+        #expect(Parsers.spctlAssessment("/Applications/Other.app: accepted\n", path: "/Applications/X.app") == nil)
+    }
+
     @Test func gatekeepersVerdictWins() {
         // Offline the ticket isn't found, but Gatekeeper (online) says notarized: shown in its words, not flagged.
         let edge = CodeSignatureInfo(valid: true, notarized: true, teamID: "UBF8T346G9", gatekeeperAccepted: true,

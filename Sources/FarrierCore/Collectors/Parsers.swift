@@ -192,6 +192,18 @@ public enum Parsers {
         return items.count == count ? .array(items) : nil
     }
 
+    /// `spctl --assess --type execute -vv <path>` → Gatekeeper's verdict and its source, e.g.
+    /// "<path>: accepted" / "source=Notarized Developer ID". Nil if neither verdict is there for that path.
+    public static func spctlAssessment(_ text: String, path: String) -> (accepted: Bool, source: String?)? {
+        let lines = text.split(separator: "\n").map(String.init)
+        let accepted: Bool
+        if lines.contains("\(path): accepted") { accepted = true }
+        else if lines.contains("\(path): rejected") { accepted = false }
+        else { return nil }
+        let source = lines.first { $0.hasPrefix("source=") }.map { String($0.dropFirst("source=".count)) }
+        return (accepted, source)
+    }
+
     /// `dscl . -read /Groups/admin GroupMembership` → sorted member names. A group without the key has no members.
     public static func groupMembers(_ text: String) -> FactValue? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
