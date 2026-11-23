@@ -93,6 +93,15 @@ public struct SystemCollectors: Sendable {
         },
         Source(fact: "firewall.stealthMode", executable: "/usr/libexec/ApplicationFirewall/socketfilterfw",
                arguments: ["--getstealthmode"]) { Parsers.firewallStealthMode($0.combined) },
+        Source(fact: "sip.authenticatedRoot", executable: "/usr/bin/csrutil", arguments: ["authenticated-root", "status"]) {
+            Parsers.authenticatedRoot($0.combined)
+        },
+        Source(fact: "accounts.rootEnabled", executable: "/usr/bin/dscl", arguments: [".", "-read", "/Users/root", "AuthenticationAuthority"]) {
+            Parsers.rootAccountEnabled($0.combined)
+        },
+        Source(fact: "screenlock", executable: "/usr/sbin/sysadminctl", arguments: ["-screenLock", "status"]) {
+            Parsers.screenLock($0.combined)
+        },
         // Sockets of all users are listed without privileges (no process names, which would need root).
         Source(fact: "network.listeningTCP", executable: "/usr/sbin/netstat", arguments: ["-anp", "tcp"]) {
             Parsers.listeningTCPPorts($0.stdout)
@@ -141,6 +150,7 @@ public struct SystemCollectors: Sendable {
         }
 
         collectSoftwareUpdate(into: &facts, notes: &notes)
+        collectLoginWindow(into: &facts, notes: &notes)
         collectDeclarationTypes(into: &facts, notes: &notes)
         collectManagedPreferences(into: &facts, notes: &notes)
 
@@ -151,6 +161,31 @@ public struct SystemCollectors: Sendable {
     }
 
     static let managedPreferencesDirectory = "/Library/Managed Preferences"
+
+    static let loginWindowPlist = "/Library/Preferences/com.apple.loginwindow.plist"
+    static let loginWindowManagedPlist = "/Library/Managed Preferences/com.apple.loginwindow.plist"
+
+    /// Login window settings: `{ GuestEnabled, RetriesUntilHint, SHOWFULLNAME, autoLogin }`, managed values first.
+    /// `autoLogin` is whether `autoLoginUser` is set (the user's name isn't kept); the others only when set.
+    func collectLoginWindow(into facts: inout [String: FactValue], notes: inout [CollectionNote]) {
+        let fact = "loginwindow.prefs"
+        let (local, localProblem) = loadPlist(Self.loginWindowPlist)
+        let (managed, managedProblem) = loadPlist(Self.loginWindowManagedPlist)
+        if let problem = managedProblem ?? localProblem {
+            notes.append(CollectionNote(fact: fact, status: .failed, source: Self.loginWindowPlist, detail: problem))
+            return
+        }
+        guard let local else {
+            notes.append(CollectionNote(fact: fact, status: .unavailable, source: Self.loginWindowPlist, detail: "not found"))
+            return
+        }
+        var o: [String: FactValue] = ["autoLogin": .bool(local["autoLoginUser"]?.string.map { !$0.isEmpty } ?? false)]
+        for key in ["GuestEnabled", "RetriesUntilHint", "SHOWFULLNAME"] {
+            if let v = managed?[key] ?? local[key] { o[key] = v }
+        }
+        facts[fact] = .object(o)
+        notes.append(CollectionNote(fact: fact, status: .collected, source: Self.loginWindowPlist, detail: nil))
+    }
 
     /// `mdm.managedPreferences` alone, parsed (the helper checks it before changing a setting). Nil if unreadable.
     public func managedPreferences() -> [String: Set<String>]? {

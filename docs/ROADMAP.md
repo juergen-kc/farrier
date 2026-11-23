@@ -148,7 +148,11 @@ To do:
   first real (notarized) release to be tested
 - MCP: progress notifications for long calls; resources (`farrier://plan/{id}`, `farrier://journal/recent`); the
   other runbook prompts; validation with Claude Desktop
-- `posture.core` pack: about 25 high-value checks with mSCP mappings
+- `posture.core` pack: **25 checks, written, not yet validated on the VM.** Added: update check, download, macOS
+  and App Store updates; the sealed system volume; the root account; guest account, automatic login, password
+  hints; screen lock within 5 seconds; File Sharing, Remote Apple Events, Printer Sharing and AirPlay Receiver (from
+  the listening ports). 22 have mSCP mappings. New T0 facts: `sip.authenticatedRoot`, `accounts.rootEnabled`,
+  `screenlock`, `loginwindow.prefs`
 - `--json` everywhere in the CLI
 - `--redact`
 

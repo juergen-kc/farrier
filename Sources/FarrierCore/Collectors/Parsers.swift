@@ -172,6 +172,35 @@ public enum Parsers {
         return .array(summaries.sorted { $0.0 < $1.0 }.map(\.1))
     }
 
+    /// `csrutil authenticated-root status` → "enabled" | "disabled" (the Signed System Volume's sealed root).
+    public static func authenticatedRoot(_ text: String) -> FactValue? {
+        guard let state = firstMatch(#"Authenticated Root status:\s*(\w+)"#, in: text) else { return nil }
+        switch state {
+        case "enabled", "disabled": return .string(state)
+        default: return nil
+        }
+    }
+
+    /// `dscl . -read /Users/root AuthenticationAuthority` → whether the root account can log in. No authentication
+    /// authority, or a disabled one, means it can't.
+    public static func rootAccountEnabled(_ text: String) -> FactValue? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.contains("No such key: AuthenticationAuthority") { return .bool(false) }
+        guard trimmed.hasPrefix("AuthenticationAuthority:") else { return nil }
+        return .bool(!trimmed.contains("DisabledUser"))
+    }
+
+    /// `sysadminctl -screenLock status` (it logs to stderr, with a timestamp prefix) → `{ enabled, delaySeconds }`:
+    /// how soon a password is required after sleep or the screen saver starts.
+    public static func screenLock(_ text: String) -> FactValue? {
+        if text.range(of: #"screenLock is off"#, options: .regularExpression) != nil { return .object(["enabled": .bool(false)]) }
+        if text.contains("screenLock delay is immediate") { return .object(["enabled": .bool(true), "delaySeconds": .int(0)]) }
+        if let n = firstMatch(#"screenLock delay is (\d+) seconds?"#, in: text), let seconds = Int(n) {
+            return .object(["enabled": .bool(true), "delaySeconds": .int(seconds)])
+        }
+        return nil
+    }
+
     /// `systemextensionsctl list` → `[{ category, teamID, bundleID, version, name, state, enabled, active }]`.
     /// Strict: the "N extension(s)" count must match the rows read, or the output isn't trusted (nil).
     public static func systemExtensions(_ text: String) -> FactValue? {
