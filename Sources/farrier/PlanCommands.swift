@@ -30,7 +30,15 @@ struct Setup: ParsableCommand {
         do {
             let report = try ApprovalSetup.run(rotate: rotate)
             for step in report.steps { print("- \(step)") }
-            print("approval key ready: \(report.fingerprint.map { String($0.prefix(16)) + "…" } ?? "?")")
+            var ready = "approval key ready: \(report.fingerprint.map { String($0.prefix(16)) + "…" } ?? "?")"
+            if let enrolledAt = report.enrolledAt {
+                let next = Date(timeIntervalSince1970: TimeInterval(enrolledAt + Int64(ApprovalKeyPolicy.maxAgeDays) * 86_400))
+                let f = DateFormatter()
+                f.dateStyle = .medium
+                f.timeStyle = .none
+                ready += " (replaced every \(ApprovalKeyPolicy.maxAgeDays) days: run `farrier setup` again before \(f.string(from: next)))"
+            }
+            print(ready)
             // Not part of the key, but the last step of onboarding: say if it's missing, and how to fix it.
             if case .success(false)? = try? HelperClient.fullDiskAccess() {
                 print("next: give Farrier.app Full Disk Access, for the checks that read privacy-protected data: `farrier helper full-disk-access`")
@@ -206,6 +214,13 @@ struct Apply: ParsableCommand {
             throw ExitCode(1)
         }
         if out.results.contains(where: { $0.outcome == .failed || $0.outcome == .refused }) { throw ExitCode(1) }
+        #if os(macOS)
+        // After a successful apply, say if the approval key is due for its periodic rotation.
+        if let key = try? HelperClient.approvalKeyStatus(),
+           let notice = ApprovalKeyPolicy.notice(enrolledAt: key.enrolledAt, now: Int64(Date().timeIntervalSince1970)) {
+            note(notice)
+        }
+        #endif
     }
 }
 

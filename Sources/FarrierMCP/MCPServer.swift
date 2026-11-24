@@ -301,6 +301,8 @@ public struct StatusOutput: Codable {
     public let approvalKeyEnrolled: Bool?
     public let approvalKeyOnThisAccount: Bool?
     public let approvalKeyMatches: Bool?
+    /// How many days ago the helper enrolled the key; approvals stop at `ApprovalKeyPolicy.maxAgeDays`.
+    public let approvalKeyAgeDays: Int?
     /// Whether Farrier.app has Full Disk Access (nil: unknown). Without it, facts that need it are unavailable.
     public let fullDiskAccess: Bool?
     public let problems: [String]
@@ -314,6 +316,7 @@ enum Status {
         var enrolled: Bool?
         var matches: Bool?
         var fda: Bool?
+        var ageDays: Int?
         let local = ApprovalKey.exists
         do {
             let info = try HelperClient.hello()
@@ -321,6 +324,13 @@ enum Status {
             let key = try HelperClient.approvalKeyStatus()
             if let error = key.error { problems.append(error) }
             enrolled = key.enrolled
+            if let enrolledAt = key.enrolledAt {
+                let now = Int64(Date().timeIntervalSince1970)
+                ageDays = Int(max(0, now - enrolledAt) / 86_400)
+                if let notice = ApprovalKeyPolicy.notice(enrolledAt: enrolledAt, now: now) {
+                    problems.append(notice.replacingOccurrences(of: "run `farrier setup`", with: "the user runs `farrier setup` in Terminal"))
+                }
+            }
             if local, let fp = key.fingerprint, let pub = try? ApprovalKey.publicKey() {
                 matches = FarrierCrypto.sha256(pub).hexString == fp
             }
@@ -341,12 +351,14 @@ enum Status {
         if matches == false { problems.append("the helper has a different approval key; the user runs `farrier setup`") }
         return StatusOutput(version: FarrierVersion.string, protocolVersion: HelperConstants.protocolVersion,
                             helper: HelperClient.status, helperRunning: running, approvalKeyEnrolled: enrolled,
-                            approvalKeyOnThisAccount: local, approvalKeyMatches: matches, fullDiskAccess: fda,
+                            approvalKeyOnThisAccount: local, approvalKeyMatches: matches, approvalKeyAgeDays: ageDays,
+                            fullDiskAccess: fda,
                             problems: problems)
         #else
         return StatusOutput(version: FarrierVersion.string, protocolVersion: HelperConstants.protocolVersion,
                             helper: "unavailable (macOS only)", helperRunning: nil, approvalKeyEnrolled: nil,
-                            approvalKeyOnThisAccount: nil, approvalKeyMatches: nil, fullDiskAccess: nil,
+                            approvalKeyOnThisAccount: nil, approvalKeyMatches: nil, approvalKeyAgeDays: nil,
+                            fullDiskAccess: nil,
                             problems: ["the helper exists only on macOS"])
         #endif
     }

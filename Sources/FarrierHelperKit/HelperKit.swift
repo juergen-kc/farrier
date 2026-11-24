@@ -8,7 +8,7 @@ public enum HelperConstants {
     public static let machService = "dev.farrier.helper"       // launchd label and Mach service
     public static let daemonPlist = "dev.farrier.helper.plist" // Farrier.app/Contents/Library/LaunchDaemons/
     /// Bumped when the XPC protocol changes incompatibly.
-    public static let protocolVersion = 5
+    public static let protocolVersion = 6
     /// What the version handshake compares: the build version AND the protocol, so a protocol change restarts a
     /// running helper even when the version string stays the same (as it does between development builds).
     public static var handshakeVersion: String { "\(FarrierVersion.string)+p\(protocolVersion)" }
@@ -110,11 +110,56 @@ public struct ApprovalKeyStatus: Codable, Sendable {
     public let enrolled: Bool
     public let fingerprint: String?
     public let error: String?
+    /// When the helper enrolled the key (its root-owned copy's modification time), in seconds since 1970.
+    public let enrolledAt: Int64?
 
-    public init(enrolled: Bool, fingerprint: String?, error: String?) {
+    public init(enrolled: Bool, fingerprint: String?, error: String?, enrolledAt: Int64? = nil) {
         self.enrolled = enrolled
         self.fingerprint = fingerprint
         self.error = error
+        self.enrolledAt = enrolledAt
+    }
+}
+
+/// Periodic rotation (THREAT_MODEL.md, T-3): a key blob disclosed by a one-time "Allow" in a keychain dialog leaves no
+/// trace, so every key is replaced after `maxAgeDays`. The helper enforces it (it refuses new approvals with an older
+/// key); `farrier setup` rotates a key that's due, and warnings start `warnDays` before.
+public enum ApprovalKeyPolicy {
+    public static let maxAgeDays = 30
+    public static let warnDays = 5
+    static let day: Int64 = 86_400
+
+    public enum Age: Equatable, Sendable {
+        case fresh(days: Int)
+        /// Rotation is due within `daysLeft` days (0: today).
+        case dueSoon(daysLeft: Int)
+        case expired(days: Int)
+    }
+
+    public static func age(enrolledAt: Int64, now: Int64) -> Age {
+        let seconds = max(0, now - enrolledAt)
+        let days = Int(seconds / day)
+        if seconds >= Int64(maxAgeDays) * day { return .expired(days: days) }
+        let left = Int((Int64(maxAgeDays) * day - seconds) / day)
+        return left < warnDays ? .dueSoon(daysLeft: left) : .fresh(days: days)
+    }
+
+    /// The helper's refusal for a key it won't use any more.
+    public static func expiredMessage(days: Int) -> String {
+        "the approval key was enrolled \(days) days ago, and keys are replaced every \(maxAgeDays) days: run `farrier setup` "
+            + "in Terminal to rotate it (an admin dialog appears), then try again"
+    }
+
+    /// One line for setup, apply and status; nil while nothing needs saying.
+    public static func notice(enrolledAt: Int64?, now: Int64) -> String? {
+        guard let enrolledAt else { return nil }
+        switch age(enrolledAt: enrolledAt, now: now) {
+        case .fresh: return nil
+        case .dueSoon(let left):
+            return "the approval key must be rotated " + (left == 0 ? "today" : "within \(left) day(s)")
+                + ": run `farrier setup` (an admin dialog appears); after that, approvals are refused until you do"
+        case .expired(let days): return expiredMessage(days: days)
+        }
     }
 }
 

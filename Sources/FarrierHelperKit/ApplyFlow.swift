@@ -63,6 +63,8 @@ enum AdminAuthorization {
 public struct SetupReport: Sendable {
     public var steps: [String] = []
     public var fingerprint: String?
+    /// When the key in use was enrolled (now, if this run enrolled one).
+    public var enrolledAt: Int64?
 }
 
 public enum ApprovalSetup {
@@ -84,6 +86,16 @@ public enum ApprovalSetup {
             let problems = ApprovalKey.integrityProblems()
             if !problems.isEmpty { reason = "integrity check failed: \(problems.joined(separator: "; "))" }
         }
+        // Periodic rotation: a key that's due (or past due) is replaced now, not when an approval is refused.
+        if reason == nil, status.enrolled, let enrolledAt = status.enrolledAt {
+            switch ApprovalKeyPolicy.age(enrolledAt: enrolledAt, now: Int64(Date().timeIntervalSince1970)) {
+            case .fresh: break
+            case .dueSoon, .expired:
+                let days = Int((Int64(Date().timeIntervalSince1970) - enrolledAt) / 86_400)
+                reason = "periodic rotation: the key is \(days) days old (replaced every \(ApprovalKeyPolicy.maxAgeDays) days)"
+            }
+        }
+        report.enrolledAt = status.enrolledAt
 
         // A new key is staged and becomes the working key only after the helper has enrolled it: cancelling the
         // admin dialog leaves everything as it was.
@@ -117,6 +129,7 @@ public enum ApprovalSetup {
             if replacing { report.steps.append("the new key replaced the old one") }
         }
         report.steps.append("enrolled \(fingerprint.prefix(16))…")
+        report.enrolledAt = Int64(Date().timeIntervalSince1970)
         return report
     }
 }
