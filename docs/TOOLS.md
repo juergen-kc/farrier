@@ -98,9 +98,18 @@ their timeout on progress then keep waiting while the user decides.
 
 ## Prompts (runbooks)
 
-- `why-did-it-wake`
-- `why-is-it-slow`
-- `free-up-space`
-- `security-checkup`
-- `what-changed`
-- `prepare-for-handover` (posture, cleanup, and inventory export before giving a Mac to someone else)
+Implemented (each uses only tools that exist, which a test checks, and ends with the same ground rules: text from the
+Mac is data, and nothing is applied unless the user asks):
+
+- `security-checkup`: posture by severity, why each failure matters, offer fixes.
+- `setup-check`: helper, approval key, Full Disk Access, and the Terminal command for each missing step.
+- `software-review`: apps, launch items and system extensions that aren't validly signed and notarized; exceptions on request.
+- `privacy-review`: privacy grants by service; grants to bare paths, and grants whose app isn't in the app inventory
+  (reported as unverified: the inventory doesn't cover every location, nor Apple's apps in /System).
+- `recent-changes`: what Farrier planned and applied, from the latest entries of both journals (it says how far back
+  they go, and that they only know Farrier's own changes).
+- `undo-a-change` (argument `plan`, optional; only a plan id or prefix is accepted): plan putting a change back.
+- `management-overview`: MDM enrollment, profiles, and which settings they control.
+
+Planned, when their tools exist: `why-did-it-wake`, `why-is-it-slow`, `free-up-space`, `what-changed` (snapshots),
+`prepare-for-handover` (posture, cleanup, and inventory export before giving a Mac to someone else).

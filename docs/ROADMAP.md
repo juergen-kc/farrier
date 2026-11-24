@@ -154,13 +154,21 @@ Done:
       `progressToken` with every tool call, and while the approval prompt was open for `apply_plan` Farrier sent
       "waiting for the user to approve on the Mac" every 5 s (0–20 s) until the user approved.
 
+- [x] MCP runbook prompts: `setup-check`, `software-review`, `privacy-review`, `recent-changes`, `undo-a-change` (argument
+      `plan`), `management-overview`, with `security-checkup`; each uses only existing tools (tested). **Validated** with
+      Claude Code on the macOS 27.2.1 VM: setup-check found the missing Full Disk Access; software-review put the
+      invalid URL handler first, explained the Parallels jobs (Developer ID, not notarized) and offered an exception only
+      on request, and called the development builds and Chrome's shims expected; undo-a-change made the undo plan and
+      didn't apply it. Two overconfident claims were traced to the prompt wording and fixed (what each setup step asks;
+      that an undo can still be refused when applied).
+
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
   Developer ID signing
 - Homebrew cask: the tap ([juergen-kc/homebrew-farrier](https://github.com/juergen-kc/homebrew-farrier), with
   `brew style`/`brew audit` CI) exists and the release workflow commits each release's cask to it; it still needs a
   first real (notarized) release to be tested
-- MCP: the other runbook prompts; validation with Claude Desktop
+- MCP: validation with Claude Desktop; runbooks for tools still to come (why-did-it-wake, free-up-space, …)
 - `--json` everywhere in the CLI
 - `--redact`
 
