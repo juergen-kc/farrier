@@ -13,12 +13,11 @@ rules:
       - path: ~/.npm/_cacache
         type: directory
     regenerable: true
-    minAge: 30d
-    when:
-      processNotRunning: [node, npm]
+    minAge: 30d                   # no "npm isn't running" condition: npm runs as `node`, like Claude Code
     evidence: >
       Packages npm downloaded before. It downloads them again on the next install that needs them;
-      `npm cache clean --force` removes the same folder.
+      `npm cache clean --force` removes the same folder. Only listed when nothing in it was written or
+      read for 30 days, so no install is using it.
 
   - id: dev.packages.cargo
     title: Cargo download cache
@@ -43,10 +42,8 @@ rules:
       - path: ~/.gradle/caches/*
         type: directory
     regenerable: true
-    minAge: 30d
-    when:
-      processNotRunning: [java]
+    minAge: 30d                   # no "Gradle isn't running" condition: its daemon is `java`, like many apps
     evidence: >
       Dependencies and build outputs Gradle cached. The next build downloads and rebuilds what it needs,
-      which takes longer once.
+      which takes longer once. Only listed when nothing in it was written or read for 30 days.
 
