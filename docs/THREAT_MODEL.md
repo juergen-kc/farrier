@@ -93,7 +93,8 @@
   presence is still required for every signature, but the prompt can lie. A one-time "Allow" leaves **no trace in
   the access list**, so the integrity check cannot detect it ("Always Allow" can be detected; see F2). Mitigations:
   - the item label warns that Farrier never shows this dialog
-  - **periodic key rotation** (planned: every 30 days, and on demand), which limits how long a disclosed blob stays useful
+  - **periodic key rotation** (every 30 days, enforced by the helper, which refuses approvals with an older key; and on
+    demand with `farrier setup --rotate`), which limits how long a disclosed blob stays useful
   - rotate immediately whenever the integrity check finds anything
   - **preferred long-term fix:** a key whose *use* (not just storage) is bound to Farrier's code identity, for example a
     Secure Enclave key in the data-protection keychain with an access group (spike Approach B). That needs an

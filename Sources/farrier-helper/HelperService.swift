@@ -128,6 +128,13 @@ extension HelperService {
         FileManager.default.contents(atPath: HelperConstants.approvalKeyPath)
     }
 
+    /// When the key was enrolled: the modification time of the root-owned copy, which only the helper writes.
+    private static func enrolledAt() -> Int64? {
+        guard let date = (try? FileManager.default.attributesOfItem(atPath: HelperConstants.approvalKeyPath))?[.modificationDate] as? Date
+        else { return nil }
+        return Int64(date.timeIntervalSince1970)
+    }
+
     /// Appends to the helper's journal. Returns the error, if any: callers that change the Mac must not go on
     /// without a record (a full disk or a damaged journal stops remediation).
     @discardableResult
@@ -153,7 +160,8 @@ extension HelperService {
         guard let key = Self.enrolledKey() else {
             return reply(HelperWire.encode(ApprovalKeyStatus(enrolled: false, fingerprint: nil, error: nil)))
         }
-        reply(HelperWire.encode(ApprovalKeyStatus(enrolled: true, fingerprint: FarrierCrypto.sha256(key).hexString, error: nil)))
+        reply(HelperWire.encode(ApprovalKeyStatus(enrolled: true, fingerprint: FarrierCrypto.sha256(key).hexString, error: nil,
+                                                  enrolledAt: Self.enrolledAt())))
     }
 
     func enrollApprovalKey(publicKey: Data, authorization: Data, clientVersion: String, reply: @escaping (Data) -> Void) {
@@ -203,6 +211,14 @@ extension HelperService {
         guard planHash.count == 32 else { return reply(HelperWire.encode(BeginApprovalReply(grant: nil, error: "planHash must be 32 bytes"))) }
         guard Self.enrolledKey() != nil else {
             return reply(HelperWire.encode(BeginApprovalReply(grant: nil, error: "no approval key is enrolled; run `farrier setup`")))
+        }
+        // Periodic rotation is enforced here, where a disclosed key blob can't skip it. Unknown age fails closed.
+        guard let enrolledAt = Self.enrolledAt() else {
+            return reply(HelperWire.encode(BeginApprovalReply(grant: nil, error: "can't tell when the approval key was enrolled; run `farrier setup --rotate`")))
+        }
+        if case .expired(let days) = ApprovalKeyPolicy.age(enrolledAt: enrolledAt, now: Int64(Date().timeIntervalSince1970)) {
+            helperLog("beginApproval refused: approval key is \(days) days old")
+            return reply(HelperWire.encode(BeginApprovalReply(grant: nil, error: ApprovalKeyPolicy.expiredMessage(days: days))))
         }
         let grant = Self.approvals.issue(planHash: planHash, now: Int64(Date().timeIntervalSince1970))
         reply(HelperWire.encode(BeginApprovalReply(grant: grant, error: nil)))
