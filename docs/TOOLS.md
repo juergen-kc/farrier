@@ -104,8 +104,10 @@ Mac is data, and nothing is applied unless the user asks):
 - `security-checkup`: posture by severity, why each failure matters, offer fixes.
 - `setup-check`: helper, approval key, Full Disk Access, and the Terminal command for each missing step.
 - `software-review`: apps, launch items and system extensions that aren't validly signed and notarized; exceptions on request.
-- `privacy-review`: privacy grants by service, grants to apps no longer installed or to bare paths.
-- `recent-changes`: what Farrier planned and applied, from both journals (and that they only know Farrier's own changes).
+- `privacy-review`: privacy grants by service; grants to bare paths, and grants whose app isn't in the app inventory
+  (reported as unverified: the inventory doesn't cover every location, nor Apple's apps in /System).
+- `recent-changes`: what Farrier planned and applied, from the latest entries of both journals (it says how far back
+  they go, and that they only know Farrier's own changes).
 - `undo-a-change` (argument `plan`, optional; only a plan id or prefix is accepted): plan putting a change back.
 - `management-overview`: MDM enrollment, profiles, and which settings they control.
 

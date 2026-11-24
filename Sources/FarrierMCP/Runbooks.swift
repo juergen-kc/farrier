@@ -66,9 +66,11 @@ public enum Runbooks {
             Review the privacy grants on this Mac. Call inventory with sections ["privacyGrants", "apps"]. If the privacy \
             grants aren't available because Farrier.app lacks Full Disk Access (farrier_status shows it), say so, tell me \
             to run `farrier helper full-disk-access` in Terminal, and stop there. Otherwise group the grants by service (Full \
-            Disk Access, Accessibility, Screen Recording, Input Monitoring, …), and point out: grants to apps that are no \
-            longer installed (compare with the apps section), grants to bare paths rather than apps, and powerful grants \
-            to apps that don't obviously need them. Farrier doesn't change privacy grants: tell me where to turn each one \
+            Disk Access, Accessibility, Screen Recording, Input Monitoring, …), and point out: grants to bare paths rather \
+            than apps, powerful grants to apps that don't obviously need them, and grants whose app isn't in the apps \
+            section. The apps section only covers /Applications and ~/Applications (Apple's own apps, such as Terminal, \
+            live in /System and aren't listed), so call those unverified, not uninstalled, and ask me before suggesting \
+            to remove a grant because its app seems gone. Farrier doesn't change privacy grants: tell me where to turn each one \
             off (System Settings → Privacy & Security → the service).
             """
         },
@@ -76,10 +78,11 @@ public enum Runbooks {
                 description: "Summarise the changes Farrier planned and applied, from its journals",
                 arguments: [], tools: ["journal_recent", "plan_undo"]) { _ in
             """
-            Summarise what Farrier has done on this Mac. Call journal_recent for my journal and journal_recent with \
-            helper: true for the privileged helper's journal. List what was applied (with the earlier state, where the \
-            entry records one), what was refused, cancelled or failed, and which plans were made but never applied. Say \
-            whether both hash chains are intact. Note that the journals only record Farrier's own changes: if a setting \
+            Summarise what Farrier has done on this Mac. Call journal_recent with last: 200 for my journal and with \
+            helper: true, last: 200 for the privileged helper's journal. List what was applied (with the earlier state, \
+            where the entry records one), what was refused, cancelled or failed, and which plans have no application in \
+            the entries you got. Both lists are the latest entries only: say how far back each goes, and don't call a \
+            plan "never applied" when its application could be older than that. Say whether both hash chains are intact. Note that the journals only record Farrier's own changes: if a setting \
             changed back later, they can't say who changed it, so don't guess. For changes that can be undone, mention \
             that plan_undo can plan putting them back.
             """
@@ -95,9 +98,9 @@ public enum Runbooks {
             I want to undo \(target ?? "a change Farrier made"). \(target == nil
                 ? "Call journal_recent with helper: true and list the applied changes that record an earlier state, newest first, and ask me which one; then call plan_undo for that plan."
                 : "Call plan_undo for it.") Show me the undo plan (plan_show): what it will restore, and anything left out \
-            and why (Gatekeeper and exceptions have no undo). Say that the helper checks again when the plan is applied: if \
-            the setting is no longer as Farrier left it by then, the undo is refused and nothing changes. Don't claim it \
-            will go through; you only know the state you saw when planning.
+            and why (Gatekeeper and exceptions have no undo). Say that the helper checks each item again when the plan is \
+            applied: an item whose setting is no longer as Farrier left it is refused and stays as it is, while the other \
+            items are still restored. Don't claim any item will go through; you only know the state you saw when planning.
             """
         },
         Runbook(name: "management-overview", title: "Who manages this Mac?",
