@@ -261,7 +261,7 @@ struct ApprovalTests {
             return try Plan(id: "id", createdAt: f.now, expiresAt: f.now + 900, host: host, items: [item]).canonicalData()
         }
         let unknown = try plan("shell.run", .t4)
-        #expect(refusal(f.verify(try f.approve(hash: FarrierCrypto.sha256(unknown)), planData: unknown)) == "unknown action `shell.run`")
+        #expect(refusal(f.verify(try f.approve(hash: FarrierCrypto.sha256(unknown)), planData: unknown))?.hasPrefix("unknown action `shell.run`: the plan was probably made by a newer Farrier") == true)
         let downgraded = try plan("firewall.enable", .t2)
         #expect(refusal(f.verify(try f.approve(hash: FarrierCrypto.sha256(downgraded)), planData: downgraded))?.contains("is T4, but the plan says T2") == true)
     }

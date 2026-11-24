@@ -107,7 +107,8 @@ public struct Plan: Codable, Sendable, Equatable {
         // that can edit a saved plan must not be able to describe one change and have another approved.
         for item in plan.items {
             guard let action = RemediationCatalog.action(item.action) else {
-                throw PlanError("unknown action `\(item.action)`")
+                throw PlanError("unknown action `\(item.action)`: the plan was probably made by a newer Farrier "
+                                + "(this is \(FarrierVersion.string)); apply it with the farrier that made it")
             }
             guard item.tier == action.tier else {
                 throw PlanError("`\(item.action)` is \(action.tier.rawValue), but the plan says \(item.tier.rawValue)")
