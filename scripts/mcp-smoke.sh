@@ -10,7 +10,11 @@ requests() {
     '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"posture_explain","arguments":{"ruleID":"posture.core.firewall"}}}' \
-    '{"jsonrpc":"2.0","id":4,"method":"prompts/list"}'
+    '{"jsonrpc":"2.0","id":4,"method":"prompts/list"}' \
+    '{"jsonrpc":"2.0","id":5,"method":"resources/list"}' \
+    '{"jsonrpc":"2.0","id":6,"method":"resources/templates/list"}' \
+    '{"jsonrpc":"2.0","id":7,"method":"resources/read","params":{"uri":"farrier://journal/recent"}}' \
+    '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"farrier_status","arguments":{},"_meta":{"progressToken":"smoke-1"}}}'
 }
 # Like a real client, keep stdin open until the replies are in.
 ( requests; sleep 5 ) | "$BIN" mcp > "$OUT"
@@ -22,6 +26,10 @@ for tool in farrier_status facts_collect posture_check posture_explain posture_p
 done
 grep -q '"fixAction":"firewall.enable"' "$OUT" || fail "posture_explain did not return the firewall rule"
 grep -q '"security-checkup"' "$OUT" || fail "prompts/list lacks security-checkup"
+grep -q '"uri":"farrier://journal/recent"' "$OUT" || fail "resources/list lacks the journal"
+grep -q '"uriTemplate":"farrier://plan/{id}"' "$OUT" || fail "resources/templates/list lacks the plan template"
+grep -q '"id":7,"jsonrpc":"2.0","result":{"contents"' "$OUT" || grep -q '"contents":\[' "$OUT" || fail "resources/read returned no contents"
+grep -q '"method":"notifications/progress"' "$OUT" || fail "no progress notification for a call with a progress token"
 # Every stdout line must be a JSON-RPC message (nothing else may write to stdout in MCP mode).
 if grep -v '^{"' "$OUT" | grep -q .; then fail "non-JSON output on stdout"; fi
 # End of input right after the requests (spike M2b): replies must still arrive.

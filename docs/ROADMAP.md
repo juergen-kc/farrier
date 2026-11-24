@@ -154,8 +154,9 @@ To do:
 - Homebrew cask: the tap ([juergen-kc/homebrew-farrier](https://github.com/juergen-kc/homebrew-farrier), with
   `brew style`/`brew audit` CI) exists and the release workflow commits each release's cask to it; it still needs a
   first real (notarized) release to be tested
-- MCP: progress notifications for long calls; resources (`farrier://plan/{id}`, `farrier://journal/recent`); the
-  other runbook prompts; validation with Claude Desktop
+- MCP: progress notifications for long calls and the resources `farrier://plan/{id}`, `farrier://journal/recent` and
+  `farrier://journal/helper`: **written, not yet validated with Claude Code.** Still open: the other runbook prompts;
+  validation with Claude Desktop
 - `--json` everywhere in the CLI
 - `--redact`
 
