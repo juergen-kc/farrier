@@ -39,9 +39,11 @@ public enum Runbooks {
             """
             Use farrier_status to check whether Farrier is fully set up on this Mac: the privileged helper registered and \
             running, an approval key enrolled and matching this account, and Full Disk Access for Farrier.app. For each \
-            thing that's missing, say what it's for and the exact command I run in Terminal (`farrier helper register`, \
-            `farrier setup`, `farrier helper full-disk-access`); you can't do these for me, because each one asks me on \
-            the Mac. If everything is in place, say so in one line.
+            thing that's missing, say what it's for and the exact command I run in Terminal, with what happens next: \
+            `farrier helper register` (I allow Farrier under System Settings → General → Login Items), `farrier setup` \
+            (an admin password dialog), `farrier helper full-disk-access` (it opens System Settings → Privacy & Security \
+            → Full Disk Access, where I turn Farrier on myself, and waits until I have). You can't do these for me. If \
+            everything is in place, say so in one line.
             """
         },
         Runbook(name: "software-review", title: "Review apps and launch items",
@@ -93,7 +95,9 @@ public enum Runbooks {
             I want to undo \(target ?? "a change Farrier made"). \(target == nil
                 ? "Call journal_recent with helper: true and list the applied changes that record an earlier state, newest first, and ask me which one; then call plan_undo for that plan."
                 : "Call plan_undo for it.") Show me the undo plan (plan_show): what it will restore, and anything left out \
-            and why (Gatekeeper and exceptions have no undo; a setting changed since Farrier set it is refused).
+            and why (Gatekeeper and exceptions have no undo). Say that the helper checks again when the plan is applied: if \
+            the setting is no longer as Farrier left it by then, the undo is refused and nothing changes. Don't claim it \
+            will go through; you only know the state you saw when planning.
             """
         },
         Runbook(name: "management-overview", title: "Who manages this Mac?",
