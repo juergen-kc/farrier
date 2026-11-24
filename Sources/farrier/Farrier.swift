@@ -13,7 +13,7 @@ struct Farrier: AsyncParsableCommand {
         abstract: "Keep your Mac sound: hygiene, posture, drift, patching and debugging.",
         discussion: "v0.1: rule packs, fact collection, posture evaluation, the privileged helper, and plan → approve → apply for the first fix (firewall). `farrier mcp` serves the same over MCP (stdio).",
         version: version,
-        subcommands: [Posture.self, InventoryCommand.self, CleanupCommand.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Undo.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self, Uninstall.self]
+        subcommands: [Posture.self, InventoryCommand.self, CleanupCommand.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Undo.self, Restore.self, QuarantineCommand.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self, Uninstall.self]
     )
 }
 
@@ -317,7 +317,7 @@ struct CleanupCommand: ParsableCommand {
             let empty = report.rules.filter { $0.skipped == nil && $0.candidates.isEmpty && $0.incomplete == nil }.count
             if empty > 0 { print("- \(empty) rule(s) matched nothing") }
             print("")
-            print("\(ByteCount.format(report.bytes)) in \(report.candidates) item(s). Nothing was changed; cleanup plans come next.")
+            print("\(ByteCount.format(report.bytes)) in \(report.candidates) item(s). Nothing was changed; `farrier plan cleanup` plans moving them into the quarantine.")
         }
     }
 }

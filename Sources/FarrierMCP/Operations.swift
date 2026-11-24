@@ -53,6 +53,8 @@ public struct FarrierContext {
     public var collectInventory: () -> CollectionResult = { InventoryCollector().collect() }
     /// Evaluates cleanup rules against the user's home folder (read-only).
     public var cleanupScanner: () -> CleanupScanner = { CleanupScanner() }
+    /// Where cleanup plans move items to.
+    public var quarantine: Quarantine = .default
 
     public init(collectFacts: @escaping () -> CollectionResult, rulePaths: [String], plans: PlanStore, journal: Journal,
                 host: @escaping () -> String, applyThroughHelper: @escaping (Plan) throws -> ApplyReply, actor: String) {
@@ -153,6 +155,31 @@ public struct ApplyOutput: Codable {
     public let error: String?
 }
 
+public struct QuarantineSummary: Codable {
+    public let planID: String
+    public let createdAt: Int64
+    /// From then on the items may be deleted for good (by an expiry plan, T3); until then they can be restored.
+    public let expiresAt: Int64
+    public let expired: Bool
+    public let quarantined: Int
+    public let restored: Int
+    /// What the quarantined items take up: freed only once they're deleted.
+    public let bytes: Int64
+    public let path: String
+    public let items: [QuarantineItem]?
+}
+
+public struct QuarantineOutput: Codable {
+    public let plans: [QuarantineSummary]
+    /// Space the quarantine holds now (freed after expiry, not before).
+    public let bytes: Int64
+}
+
+public struct RestoreOutput: Codable {
+    public let planID: String
+    public let results: [ItemResult]
+}
+
 public struct JournalOutput: Codable {
     public let journal: String
     public let path: String
@@ -243,6 +270,10 @@ public enum Operations {
         }
         let applied = Set(records.filter { $0.outcome == "applied" && $0.ruleID != nil }.map(\.planID))
         let matches = applied.filter { $0.hasPrefix(id.lowercased()) }
+        if matches.isEmpty, id.count >= 4, let quarantined = try? ctx.quarantine.resolve(id) {
+            throw OperationError("plan \(quarantined.prefix(8)) was a cleanup: put its items back with `farrier restore \(quarantined.prefix(8))` "
+                                 + "(MCP: quarantine_restore)")
+        }
         guard matches.count == 1, let planID = matches.first, !id.isEmpty else {
             throw OperationError(matches.isEmpty ? "no applied plan \(id) in the helper's journal"
                                                  : "\(id) matches more than one applied plan; give more of the id")
@@ -266,7 +297,6 @@ public enum Operations {
                           next: "review the undo plan with the user; applying it asks them for Touch ID or their password on this Mac")
     }
 
-    /// What's on this Mac: apps, launch jobs, extensions, profiles, privacy grants, admins, ports. Read-only.
     /// Read-only: what the cleanup rules match, and how much space it takes. `minAge` (`30d`, `12w`) raises every
     /// rule's minimum age; it never lowers one.
     public static func cleanupScan(_ ctx: FarrierContext, ruleIDs: Set<String>? = nil, minAge: String? = nil) throws -> CleanupReport {
@@ -286,6 +316,7 @@ public enum Operations {
         return ctx.cleanupScanner().scan(packs, ruleIDs: ruleIDs, minAge: age)
     }
 
+    /// What's on this Mac: apps, launch jobs, extensions, profiles, privacy grants, admins, ports. Read-only.
     public static func inventory(_ ctx: FarrierContext, sections: Set<String>? = nil, flaggedOnly: Bool = false) throws -> InventoryReport {
         if let sections {
             let unknown = sections.subtracting(Inventory.sectionIDs)
@@ -339,8 +370,9 @@ public enum Operations {
     }
 
     /// Applies a saved plan. Blocks until the user answers the prompt on the Mac (or cancels).
-    public static func apply(_ ctx: FarrierContext, id: String) throws -> ApplyOutput {
+    public static func apply(_ ctx: FarrierContext, id: String, now: Date = Date()) throws -> ApplyOutput {
         let plan = try ctx.plans.load(id)
+        if plan.tier == .t2 { return applyCleanup(ctx, plan, now: now) }
         let hash = try plan.hash().hexString
         func record(_ outcome: String, _ r: ItemResult? = nil, detail: String? = nil) {
             try? ctx.journal.append(JournalRecord(time: Int64(Date().timeIntervalSince1970), actor: ctx.actor, planID: plan.id,
@@ -356,6 +388,97 @@ public enum Operations {
             record("notApplied", detail: "\(error)")
             return ApplyOutput(planID: plan.id, results: [], error: "\(error)")
         }
+    }
+
+    // MARK: Cleanup plans and the quarantine
+
+    /// Scans and plans moving the candidates (all, or only `paths`) into the quarantine. T2: applying needs no
+    /// approval on the Mac, and every item can be restored for 7 days.
+    public static func planCleanup(_ ctx: FarrierContext, ruleIDs: Set<String>? = nil, minAge: String? = nil,
+                                   paths: Set<String>? = nil, now: Date = Date()) throws -> PlanOutput {
+        guard ctx.rulePackSource == .bundled else {
+            throw OperationError("cleanup plans only come from Farrier's own rule packs; user packs can scan, not plan")
+        }
+        let report = try cleanupScan(ctx, ruleIDs: ruleIDs, minAge: minAge)
+        let (plan, skipped) = Planner.planCleanup(report: report, paths: paths, host: ctx.host(), now: now)
+        guard let plan else {
+            return PlanOutput(plan: nil, planHash: nil, skipped: skipped, path: nil, next: "nothing to clean up")
+        }
+        let url = try ctx.plans.save(plan)
+        let hash = try plan.hash().hexString
+        let bytes = plan.items.reduce(0) { $0 + Int64($1.observed.object?["bytes"]?.number ?? 0) }
+        try? ctx.journal.append(JournalRecord(time: plan.createdAt, actor: ctx.actor, planID: plan.id, planHash: hash,
+                                              outcome: "planned", detail: "cleanup: \(plan.items.count) item(s), \(ByteCount.format(bytes))"))
+        return PlanOutput(plan: plan, planHash: hash, skipped: skipped, path: url.path,
+                          next: "review the plan with the user; applying it moves the items into Farrier's quarantine, "
+                              + "where they stay restorable for 7 days (space is freed when the quarantine expires)")
+    }
+
+    /// Applies a cleanup (T2) plan in this process: no helper, no approval prompt.
+    static func applyCleanup(_ ctx: FarrierContext, _ plan: Plan, now: Date) -> ApplyOutput {
+        let hash = (try? plan.hash().hexString) ?? ""
+        func journal(_ outcome: String, ruleID: String? = nil, detail: String?) {
+            try? ctx.journal.append(JournalRecord(time: Int64(now.timeIntervalSince1970), actor: ctx.actor, planID: plan.id,
+                                                  planHash: hash, ruleID: ruleID,
+                                                  action: ruleID == nil ? nil : RemediationCatalog.cleanupQuarantine.id,
+                                                  outcome: outcome, detail: detail))
+        }
+        let refusal: String?
+        if plan.host != ctx.host() { refusal = "the plan was made on another Mac" }
+        else if Int64(now.timeIntervalSince1970) >= plan.expiresAt { refusal = "the plan expired; make a new one" }
+        else { refusal = nil }
+        if let refusal {
+            journal("notApplied", detail: refusal)
+            return ApplyOutput(planID: plan.id, results: [], error: refusal)
+        }
+        do {
+            let results = try CleanupApplier.apply(plan, packs: try packs(ctx), scanner: ctx.cleanupScanner(),
+                                                   quarantine: ctx.quarantine, now: now)
+            let items = results.map { r -> ItemResult in
+                let outcome: ItemResult.Outcome = r.outcome == .applied ? .applied : r.outcome == .refused ? .refused : .failed
+                return ItemResult(ruleID: r.ruleID, action: RemediationCatalog.cleanupQuarantine.id, outcome: outcome,
+                                  detail: "\(r.path): \(r.detail)")
+            }
+            for r in items { journal(r.outcome.rawValue, ruleID: r.ruleID, detail: r.detail) }
+            return ApplyOutput(planID: plan.id, results: items, error: nil)
+        } catch {
+            journal("notApplied", detail: "\(error)")
+            return ApplyOutput(planID: plan.id, results: [], error: "\(error)")
+        }
+    }
+
+    public static func quarantineList(_ ctx: FarrierContext, details: Bool = false, now: Date = Date()) -> QuarantineOutput {
+        let t = Int64(now.timeIntervalSince1970)
+        // Fully restored plans hold nothing; their manifests stay, as a record, but aren't listed.
+        let plans = ctx.quarantine.list().filter { $0.items.contains { $0.state != .restored } }.map { m in
+            QuarantineSummary(planID: m.planID, createdAt: m.createdAt, expiresAt: m.expiresAt, expired: t >= m.expiresAt,
+                              quarantined: m.items.filter { $0.state != .restored }.count,
+                              restored: m.items.filter { $0.state == .restored }.count,
+                              bytes: m.quarantinedBytes, path: ctx.quarantine.folder(m.planID), items: details ? m.items : nil)
+        }
+        return QuarantineOutput(plans: plans, bytes: plans.reduce(0) { $0 + $1.bytes })
+    }
+
+    /// Puts a cleanup plan's items back (all, or only the given original paths). T2, no approval.
+    public static func quarantineRestore(_ ctx: FarrierContext, id: String, paths: Set<String>? = nil,
+                                         now: Date = Date()) throws -> RestoreOutput {
+        let planID: String
+        do { planID = try ctx.quarantine.resolve(id) } catch let e as PlanError { throw OperationError(e.description) }
+        let results: [CleanupItemResult]
+        do { results = try CleanupApplier.restore(planID: planID, paths: paths, quarantine: ctx.quarantine, now: now) }
+        catch { throw OperationError("can't restore plan \(planID.prefix(8)): \(error)") }
+        let items = results.map { r -> ItemResult in
+            ItemResult(ruleID: r.ruleID, action: "cleanup.restore",
+                       outcome: r.outcome == .applied ? .applied : r.outcome == .refused ? .refused : .failed,
+                       detail: "\(r.path): \(r.detail)")
+        }
+        for r in items {
+            try? ctx.journal.append(JournalRecord(time: Int64(now.timeIntervalSince1970), actor: ctx.actor, planID: planID,
+                                                  planHash: "", ruleID: r.ruleID, action: r.action,
+                                                  outcome: r.outcome == .applied ? "restored" : r.outcome.rawValue,
+                                                  detail: r.detail, reverts: planID))
+        }
+        return RestoreOutput(planID: planID, results: items)
     }
 
     public static func journal(_ which: Journal, name: String, last: Int) -> JournalOutput {

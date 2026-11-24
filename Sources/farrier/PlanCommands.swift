@@ -64,7 +64,7 @@ struct PlanCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "plan",
         abstract: "Make and inspect plans. Nothing changes until `farrier apply`.",
-        subcommands: [PlanPosture.self, PlanShow.self, PlanList.self]
+        subcommands: [PlanPosture.self, PlanCleanup.self, PlanShow.self, PlanList.self]
     )
 }
 
@@ -111,6 +111,55 @@ struct PlanPosture: ParsableCommand {
     }
 }
 
+struct PlanCleanup: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "cleanup",
+        abstract: "Plan moving what `farrier cleanup scan` lists into Farrier's quarantine.",
+        discussion: """
+        Applying the plan moves the items into ~/Library/Application Support/Farrier/Quarantine (on the same volume, \
+        never copied); `farrier restore` puts them back for 7 days. The space is freed when the quarantine expires.
+        """
+    )
+
+    @Option(name: .customLong("rule"), help: "Only this cleanup rule (repeatable).")
+    var rules: [String] = []
+
+    @Option(help: "Only items unused for at least this long (60d, 12w). Raises each rule's own minimum.")
+    var minAge: String?
+
+    @Option(name: .customLong("path"), help: "Only this candidate path (repeatable), as the scan lists it.")
+    var paths: [String] = []
+
+    @Flag(help: "Output JSON.")
+    var json = false
+
+    @OptionGroup var redaction: RedactOption
+
+    func run() throws {
+        redaction.apply()
+        let out: PlanOutput
+        do {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            let full = paths.map { $0.hasPrefix("~/") ? home + $0.dropFirst(1) : $0 }
+            out = try Operations.planCleanup(FarrierContext.live(actor: "cli"), ruleIDs: rules.isEmpty ? nil : Set(rules),
+                                             minAge: minAge, paths: full.isEmpty ? nil : Set(full))
+        } catch let error as OperationError {
+            note("\(error)")
+            throw ExitCode(2)
+        }
+        if json {
+            try Output.json(out)
+            return
+        }
+        if let plan = out.plan { printPlan(plan) } else { print("nothing to clean up") }
+        if !out.skipped.isEmpty {
+            print("left out:")
+            for s in out.skipped { print("  \(s.ruleID): \(s.reason)") }
+        }
+        if let plan = out.plan { print("\nreview it, then run: farrier apply \(plan.id.prefix(8))") }
+    }
+}
+
 struct Undo: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Plan undoing what an applied plan changed. Nothing changes until `farrier apply`.",
@@ -149,10 +198,31 @@ struct Undo: ParsableCommand {
     }
 }
 
+/// `~/…` for paths in the user's home folder.
+func shortPath(_ path: String) -> String {
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+}
+
 func printPlan(_ plan: Plan) {
     let expires = Date(timeIntervalSince1970: TimeInterval(plan.expiresAt))
     let left = max(0, Int(expires.timeIntervalSinceNow / 60))
     print("plan \(plan.id)  (\(plan.tier.rawValue), hash \(plan.shortHash()), expires in \(left) min)")
+    if plan.items.allSatisfy({ $0.action == RemediationCatalog.cleanupQuarantine.id }) {
+        var total: Int64 = 0
+        for item in plan.items {
+            let o = item.observed.object ?? [:]
+            let bytes = Int64(o["bytes"]?.number ?? 0)
+            total += bytes
+            let path = (try? CleanupItemRules.validate(item.parameters).path).map(shortPath) ?? "?"
+            let regen = o["regenerable"] == .bool(true) ? "regenerable" : "not regenerable"
+            print("  [T2] \(ByteCount.format(bytes).padding(toLength: 9, withPad: " ", startingAt: 0)) \(Int(o["ageDays"]?.number ?? 0))d  \(path)")
+            print("        rule \(item.ruleID), \(regen)")
+        }
+        print("moves \(plan.items.count) item(s), \(ByteCount.format(total)), into Farrier's quarantine; "
+              + "`farrier restore` puts them back for \(Quarantine.retention / 86_400) days")
+        return
+    }
     for item in plan.items {
         print("  [\(item.tier.rawValue)] \(item.description)")
         if item.parameters == nil || RemediationCatalog.action(item.action)?.reverses != nil {
@@ -232,10 +302,25 @@ struct Apply: ParsableCommand {
     @Flag(help: "Output JSON (the per-item results).")
     var json = false
 
+    @Flag(name: .shortAndLong, help: "Cleanup plans (T2): don't ask before moving the items into the quarantine.")
+    var yes = false
+
     func run() throws {
         let plan = try PlanStore.default.load(id)
         if !json { printPlan(plan) }
-        try Helper.macOnly()
+        if plan.tier == .t2 && !yes {
+            // T2 isn't approved on the Mac: it's confirmed here (docs/ARCHITECTURE.md, tiers).
+            guard isatty(0) != 0 else {
+                note("not applied: confirm with --yes (no terminal to ask in)")
+                throw ExitCode(1)
+            }
+            FileHandle.standardError.write(Data("move these items into the quarantine? [y/N] ".utf8))
+            guard let answer = readLine(), ["y", "yes"].contains(answer.lowercased()) else {
+                note("not applied")
+                throw ExitCode(1)
+            }
+        }
+        if plan.tier.needsApproval { try Helper.macOnly() }
         // The same operation as the MCP tool `apply_plan`, journal entries included.
         let out = try Operations.apply(FarrierContext.live(actor: "cli"), id: plan.id)
         if json {
@@ -244,7 +329,12 @@ struct Apply: ParsableCommand {
             return
         }
         for r in out.results {
-            print("\(r.outcome.rawValue.padding(toLength: 16, withPad: " ", startingAt: 0)) \(r.ruleID): \(r.detail ?? "")")
+            print("\(r.outcome.rawValue.padding(toLength: 16, withPad: " ", startingAt: 0)) \(r.ruleID): \(r.detail.map(shortPathsIn) ?? "")")
+        }
+        if plan.tier == .t2 {
+            let moved = out.results.filter { $0.outcome == .applied }.count
+            if moved > 0 { print("\nmoved \(moved) item(s); put them back with: farrier restore \(plan.id.prefix(8))") }
+            if out.error == nil && moved > 0 { return }   // items in use again are refused, not a failed cleanup
         }
         if let error = out.error {
             note(out.results.isEmpty ? "not applied: \(error)" : "stopped: \(error)")
@@ -258,6 +348,95 @@ struct Apply: ParsableCommand {
             note(notice)
         }
         #endif
+    }
+}
+
+func shortPathsIn(_ text: String) -> String {
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    return text.replacingOccurrences(of: home + "/", with: "~/")
+}
+
+// MARK: - farrier restore and farrier quarantine
+
+struct Restore: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Put a cleanup plan's items back from the quarantine.",
+        discussion: "Items whose original path is taken again stay in the quarantine; move what's there away, then run it again."
+    )
+
+    @Argument(help: "The cleanup plan's id, or a unique prefix (see `farrier quarantine list`).")
+    var planID: String
+
+    @Option(name: .customLong("path"), help: "Only this original path (repeatable).")
+    var paths: [String] = []
+
+    @Flag(help: "Output JSON.")
+    var json = false
+
+    @OptionGroup var redaction: RedactOption
+
+    func run() throws {
+        redaction.apply()
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let full = paths.map { $0.hasPrefix("~/") ? home + $0.dropFirst(1) : $0 }
+        let out: RestoreOutput
+        do {
+            out = try Operations.quarantineRestore(FarrierContext.live(actor: "cli"), id: planID, paths: full.isEmpty ? nil : Set(full))
+        } catch let error as OperationError {
+            note("\(error)")
+            throw ExitCode(2)
+        }
+        if json {
+            try Output.json(out)
+        } else {
+            for r in out.results {
+                print("\(r.outcome.rawValue.padding(toLength: 10, withPad: " ", startingAt: 0)) \(r.detail.map(shortPathsIn) ?? "")")
+            }
+        }
+        if !out.results.contains(where: { $0.outcome == .applied }) { throw ExitCode(1) }
+    }
+}
+
+struct QuarantineCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "quarantine",
+        abstract: "Inspect Farrier's quarantine.",
+        subcommands: [List.self]
+    )
+
+    struct List: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "List quarantined cleanup plans and what they hold.")
+
+        @Flag(help: "List every item.")
+        var items = false
+
+        @Flag(help: "Output JSON.")
+        var json = false
+
+        @OptionGroup var redaction: RedactOption
+
+        func run() throws {
+            redaction.apply()
+            let out = Operations.quarantineList(FarrierContext.live(actor: "cli"), details: items || json)
+            if json {
+                try Output.json(out)
+                return
+            }
+            guard !out.plans.isEmpty else { print("the quarantine is empty"); return }
+            let f = DateFormatter()
+            f.dateStyle = .medium
+            f.timeStyle = .short
+            for p in out.plans {
+                let when = f.string(from: Date(timeIntervalSince1970: TimeInterval(p.expiresAt)))
+                let expiry = p.expired ? "expired \(when), can still be restored" : "kept until \(when)"
+                let restored = p.restored > 0 ? ", \(p.restored) restored" : ""
+                print("\(p.planID.prefix(8))  \(ByteCount.format(p.bytes).padding(toLength: 9, withPad: " ", startingAt: 0)) \(p.quarantined) item(s)\(restored), \(expiry)")
+                for item in p.items ?? [] where items {
+                    print("    \(item.state == .restored ? "restored" : "        ")  \(shortPath(item.original))")
+                }
+            }
+            print("\n\(ByteCount.format(out.bytes)) held in the quarantine; it's freed when the quarantine expires")
+        }
     }
 }
 

@@ -5,7 +5,7 @@ import Testing
 @testable import FarrierMCP
 
 /// A temporary home folder with real files, so the scanner runs its real code paths.
-private final class FakeHome {
+final class FakeHome {
     let root: String
     let now = Date(timeIntervalSince1970: 1_800_000_000)
     init() {
@@ -39,7 +39,7 @@ private final class FakeHome {
     }
 }
 
-private func pack(_ yaml: String) throws -> RulePack {
+func pack(_ yaml: String) throws -> RulePack {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("pack-\(UUID().uuidString).yaml")
     try yaml.write(to: url, atomically: true, encoding: .utf8)
     defer { try? FileManager.default.removeItem(at: url) }
@@ -48,7 +48,7 @@ private func pack(_ yaml: String) throws -> RulePack {
     return try #require(r.pack)
 }
 
-private func rule(_ id: String, _ body: String) -> String {
+func rule(_ id: String, _ body: String) -> String {
     """
       - id: t.\(id)
         title: \(id)
@@ -61,7 +61,7 @@ private func rule(_ id: String, _ body: String) -> String {
     """
 }
 
-private func packYAML(_ rules: String...) -> String {
+func packYAML(_ rules: String...) -> String {
     "pack:\n  id: t\n  title: T\n  version: 1\nrules:\n" + rules.joined()
 }
 
