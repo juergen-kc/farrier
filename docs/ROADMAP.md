@@ -163,8 +163,8 @@ Done:
       that an undo can still be refused when applied).
 
 To do:
-- Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
-  Developer ID signing
+- Approval key: periodic rotation every 30 days, enforced by the helper: **written, not yet validated on the VM.**
+  Still open: validation on a physical Mac with Touch ID and Developer ID signing
 - Homebrew cask: the tap ([juergen-kc/homebrew-farrier](https://github.com/juergen-kc/homebrew-farrier), with
   `brew style`/`brew audit` CI) exists and the release workflow commits each release's cask to it; it still needs a
   first real (notarized) release to be tested

@@ -33,18 +33,25 @@ public protocol CommandRunning: Sendable {
 public struct ProcessRunner: CommandRunning {
     public init() {}
 
-    /// Collects one pipe's bytes on a background thread.
+    /// Collects one pipe's bytes on a thread of its own: not a shared pool, where busy threads (say, many collectors
+    /// or tests at once) could start it late. Bytes are kept as they arrive, so a wait that runs out still returns
+    /// what was read, never nothing.
     private final class Drain: @unchecked Sendable {
         private let lock = NSLock()
         private var data = Data()
         private let done = DispatchSemaphore(value: 0)
 
         init(_ handle: FileHandle) {
-            DispatchQueue.global(qos: .userInitiated).async { [self] in
-                let bytes = handle.readDataToEndOfFile()
-                lock.lock(); data = bytes; lock.unlock()
+            let thread = Thread { [self] in
+                while true {
+                    let chunk = handle.availableData   // blocks until data or end-of-file
+                    if chunk.isEmpty { break }
+                    lock.lock(); data.append(chunk); lock.unlock()
+                }
                 done.signal()
             }
+            thread.stackSize = 256 * 1024
+            thread.start()
         }
 
         /// The bytes read, waiting at most `timeout` for end-of-file (a background grandchild may keep the pipe open).
