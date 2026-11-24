@@ -56,8 +56,10 @@ rules:
 | `evidence` | yes | Plain-language reason it's safe. It is shown in every plan. |
 
 Globs: `*` and `?` match within one component and never match a leading dot; `**` matches any number of folders
-(at most 12). Symlinks are never followed. When several rules match the same path, the one with the longest literal
-prefix keeps it (Homebrew downloads over all caches), and a match inside another match is counted once, with the outer one.
+(at most 12). Symlinks are never followed. When several rules match the same path, the target with the longest literal
+prefix keeps it (Homebrew downloads over all caches), and a match inside another match is counted once, with the outer one. A folder that can't be read completely (no permission,
+or more than 200,000 entries) is left out of a rule with a minimum age, because what wasn't seen could be recent; the
+report counts these as `incomplete`.
 
 The hardcoded protected paths (`~/Documents`, `~/Desktop`, `~/Pictures`, `~/Movies`, `~/Music`,
 iCloud Drive, `~/Library/Mobile Documents`, mail and message stores, keychains, and others)

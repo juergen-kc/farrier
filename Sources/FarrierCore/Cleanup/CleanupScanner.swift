@@ -13,7 +13,8 @@ public struct CleanupCandidate: Sendable, Codable, Equatable {
     /// The most recent use the scan could see: the newest modification or file access inside it.
     public let lastUsed: Int64
     public let ageDays: Int
-    /// The folder had more entries than the scan counts; `bytes` is a lower bound.
+    /// The folder couldn't be read completely (more entries than the scan counts, or no permission); `bytes` is a
+    /// lower bound. Only for rules without a minimum age: with one, such folders are left out (`incomplete`).
     public let sizeIsLowerBound: Bool?
 }
 
@@ -29,6 +30,9 @@ public struct CleanupRuleResult: Sendable, Codable {
     public let bytes: Int64
     /// Why the rule didn't run (an app is running, its targets need a collector, …); nil when it did.
     public let skipped: String?
+    /// Matches left out because they couldn't be read completely (no permission, or more entries than the scan
+    /// counts), so when they were last used isn't known. Nil when there were none.
+    public let incomplete: Int?
 }
 
 public struct CleanupReport: Sendable, Codable {
@@ -107,7 +111,7 @@ public struct CleanupScanner: Sendable {
     public func scan(_ packs: [RulePack], ruleIDs: Set<String>? = nil, minAge: RuleDuration? = nil) -> CleanupReport {
         var results: [CleanupRuleResult] = []
         var claimed: [String: (specificity: Int, rule: String)] = [:]   // path → the rule that took it
-        var pending: [(CleanupRule, [CleanupCandidate], String?, Int)] = []
+        var pending: [(rule: CleanupRule, found: [CleanupCandidate], skipped: String?, incomplete: Int)] = []
         lazy var processes = runningProcesses()
         for pack in packs {
             for case .cleanup(let rule) in pack.rules where ruleIDs?.contains(rule.id) ?? true {
@@ -116,22 +120,28 @@ public struct CleanupScanner: Sendable {
                 }
                 let ageLimit = max(rule.minAge?.seconds ?? 0, minAge?.seconds ?? 0)
                 var found: [CleanupCandidate] = []
+                var incomplete = 0
                 var factOnly = true
                 for target in rule.targets {
                     guard let pattern = target.path else { continue }
                     factOnly = false
+                    // The most specific target claims a path matched by several (Homebrew's cache over all caches),
+                    // measured by the target that matched it, not the rule's longest one.
+                    let specificity = ProtectedPaths.literalPrefix(of: pattern).count
                     for path in expand(pattern) {
-                        guard let c = candidate(path, target: target, ageLimit: ageLimit, minSize: rule.minSize) else { continue }
-                        found.append(c)
+                        switch candidate(path, target: target, ageLimit: ageLimit, minSize: rule.minSize) {
+                        case .candidate(let c):
+                            found.append(c)
+                            if (claimed[c.path]?.specificity ?? -1) < specificity { claimed[c.path] = (specificity, rule.id) }
+                        case .incomplete: incomplete += 1
+                        case .none: break
+                        }
                     }
                 }
                 if factOnly && !rule.targets.isEmpty {
                     pending.append((rule, [], "its targets come from a collector that isn't available yet", 0)); continue
                 }
-                // The most specific rule claims a path matched by several (Homebrew's cache over all caches).
-                let specificity = rule.targets.compactMap(\.path).map { ProtectedPaths.literalPrefix(of: $0).count }.max() ?? 0
-                for c in found where (claimed[c.path]?.specificity ?? -1) < specificity { claimed[c.path] = (specificity, rule.id) }
-                pending.append((rule, found, nil, specificity))
+                pending.append((rule, found, nil, incomplete))
             }
         }
         // A candidate inside another one is already counted (and would be moved) with it.
@@ -144,14 +154,14 @@ public struct CleanupScanner: Sendable {
             }
             return false
         }
-        for (rule, found, skipped, _) in pending {
+        for (rule, found, skipped, incomplete) in pending {
             var seen = Set<String>()
             let kept = found.filter { claimed[$0.path]?.rule == rule.id && !insideAnother($0.path) && seen.insert($0.path).inserted }.sorted { $0.bytes > $1.bytes }
             results.append(CleanupRuleResult(
                 ruleID: rule.id, title: rule.title, tier: rule.tier, regenerable: rule.regenerable,
                 evidence: rule.evidence.trimmingCharacters(in: .whitespacesAndNewlines),
                 minAgeDays: rule.minAge.map { Int($0.seconds / 86_400) }, candidates: kept,
-                bytes: kept.reduce(0) { $0 + $1.bytes }, skipped: skipped))
+                bytes: kept.reduce(0) { $0 + $1.bytes }, skipped: skipped, incomplete: incomplete > 0 ? incomplete : nil))
         }
         let all = results.flatMap(\.candidates)
         return CleanupReport(rules: results, bytes: all.reduce(0) { $0 + $1.bytes }, candidates: all.count)
@@ -192,8 +202,8 @@ public struct CleanupScanner: Sendable {
                 guard let entry = FileStat.lstat(next) else { continue }
                 if entry.isDirectory && !entry.isSymlink {
                     walk(next, rest, into: &paths, depth: depth + 1)        // one more folder, `**` still open
-                } else {
-                    walk(next, remaining, into: &paths, depth: depth + 1)   // a file (or link) ends the `**`
+                } else if remaining.isEmpty {
+                    paths.append(next)   // a file or link matches a final `**`; nothing is ever looked up through it
                 }
             }
             return
@@ -233,7 +243,9 @@ public struct CleanupScanner: Sendable {
 
     // MARK: Candidates
 
-    func candidate(_ path: String, target: CleanupTarget, ageLimit: Int64, minSize: Int64?) -> CleanupCandidate? {
+    enum Match { case candidate(CleanupCandidate), incomplete }
+
+    func candidate(_ path: String, target: CleanupTarget, ageLimit: Int64, minSize: Int64?) -> Match? {
         let name = (path as NSString).lastPathComponent
         if target.exclude.contains(where: { fnmatch($0, name, 0) == 0 }) { return nil }
         guard !containsProtected(path), let entry = FileStat.lstat(path) else { return nil }
@@ -247,27 +259,30 @@ public struct CleanupScanner: Sendable {
         for marker in target.contains where FileStat.lstat("\(parent)/\(marker)") == nil { return nil }
         let (bytes, lastUsed, truncated) = measure(path, entry)
         let age = max(0, now - lastUsed)
-        guard age >= ageLimit else { return nil }
-        if let minSize, bytes < minSize { return nil }
-        return CleanupCandidate(path: path, bytes: bytes, lastUsed: lastUsed, ageDays: Int(age / 86_400),
-                                sizeIsLowerBound: truncated ? true : nil)
+        guard age >= ageLimit else { return nil }       // something seen inside is recent: in use, whatever else is
+        if truncated && ageLimit > 0 { return .incomplete }   // what wasn't seen could be recent
+        if let minSize, bytes < minSize, !truncated { return nil }
+        return .candidate(CleanupCandidate(path: path, bytes: bytes, lastUsed: lastUsed, ageDays: Int(age / 86_400),
+                                           sizeIsLowerBound: truncated ? true : nil))
     }
 
     /// When anything in it was last used: a file's newest modification or access, a folder's newest modification.
     /// A folder's access time isn't used: listing it (this scan, Spotlight, a backup) changes it.
     static func lastUsed(_ e: FileEntry) -> Int64 { e.isDirectory ? e.modified : max(e.modified, e.accessed) }
 
-    /// Allocated size and last use of a tree, without following symlinks.
+    /// Allocated size and last use of a tree, without following symlinks. `truncated` when part of it wasn't seen:
+    /// past `entryLimit` entries, or a folder that can't be listed or an entry that can't be read.
     func measure(_ path: String, _ root: FileEntry) -> (bytes: Int64, newest: Int64, truncated: Bool) {
         var bytes = root.allocatedBytes, newest = Self.lastUsed(root), count = 0
         guard root.isDirectory && !root.isSymlink else { return (bytes, newest, false) }
         var stack = [path]
         while let dir = stack.popLast() {
-            for name in (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [] {
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return (bytes, newest, true) }
+            for name in names {
                 count += 1
                 if count > entryLimit { return (bytes, newest, true) }
                 let child = "\(dir)/\(name)"
-                guard let e = FileStat.lstat(child) else { continue }
+                guard let e = FileStat.lstat(child) else { return (bytes, newest, true) }
                 bytes += e.allocatedBytes
                 newest = max(newest, Self.lastUsed(e))
                 if e.isDirectory && !e.isSymlink { stack.append(child) }

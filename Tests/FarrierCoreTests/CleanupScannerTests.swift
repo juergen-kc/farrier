@@ -196,6 +196,42 @@ struct CleanupScannerTests {
         let s = CleanupScanner(home: home.root, now: home.now, runningProcesses: { [] }, appInstalled: { _ in false }, entryLimit: 5)
         #expect(s.scan([p]).rules[0].candidates.first?.sizeIsLowerBound == true)
         #expect(home.scanner().scan([p]).rules[0].candidates.first?.sizeIsLowerBound == nil)
+        // With a minimum age, what wasn't seen could be recent: the folder is left out and counted.
+        let aged = try pack(packYAML(rule("c", "targets:\n  - path: ~/Library/Caches/*\nminAge: 30d\n")))
+        let r = s.scan([aged]).rules[0]
+        #expect(r.candidates.isEmpty && r.incomplete == 1)
+        #expect(home.scanner().scan([aged]).rules[0].candidates.count == 1)
+    }
+
+    @Test func unreadableFoldersAreIncomplete() throws {
+        guard getuid() != 0 else { return }   // root reads everything (the Linux container); macOS CI isn't root
+        let home = FakeHome()
+        home.file("Library/Caches/locked/inner/x", daysAgo: 90)
+        chmod("\(home.root)/Library/Caches/locked/inner", 0)
+        defer { chmod("\(home.root)/Library/Caches/locked/inner", 0o755) }
+        let p = try pack(packYAML(rule("c", "targets:\n  - path: ~/Library/Caches/*\nminAge: 30d\n")))
+        let r = home.scanner().scan([p]).rules[0]
+        #expect(r.candidates.isEmpty && r.incomplete == 1)
+    }
+
+    @Test func recursiveGlobNeverPassesThroughALink() throws {
+        let home = FakeHome()
+        home.file("Documents/payload", daysAgo: 400)
+        home.file("Library/Caches/a/payload", daysAgo: 400)
+        try FileManager.default.createSymbolicLink(atPath: "\(home.root)/Library/Caches/link", withDestinationPath: "\(home.root)/Documents")
+        let p = try pack(packYAML(rule("c", "targets:\n  - path: ~/Library/Caches/**/payload\n")))
+        #expect(home.scanner().scan([p]).rules[0].candidates.map(\.path) == ["\(home.root)/Library/Caches/a/payload"])
+    }
+
+    @Test func specificityComesFromTheMatchingTarget() throws {
+        let home = FakeHome()
+        home.file("Library/Caches/special/x", daysAgo: 90)
+        let p = try pack(packYAML(
+            rule("broad", "targets:\n  - path: ~/Library/Caches/*\n  - path: ~/Library/Developer/Xcode/DerivedData/very/long/prefix/*\n"),
+            rule("exact", "targets:\n  - path: ~/Library/Caches/special\n")))
+        let report = home.scanner().scan([p])
+        #expect(report.rules[0].candidates.isEmpty)
+        #expect(report.rules[1].candidates.map(\.path) == ["\(home.root)/Library/Caches/special"])
     }
 
     @Test func bundledPacksLintAndUseKnownRoots() throws {

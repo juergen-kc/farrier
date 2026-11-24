@@ -302,6 +302,9 @@ struct CleanupCommand: ParsableCommand {
                     print("- \(rule.title): skipped, \(skipped)")
                     continue
                 }
+                if let n = rule.incomplete {
+                    print("- \(rule.title): \(n) item(s) left out, they couldn't be read completely to tell when they were last used")
+                }
                 guard !rule.candidates.isEmpty else { continue }
                 let kind = rule.regenerable ? "regenerable" : "not regenerable"
                 print("\(ByteCount.format(rule.bytes))  \(rule.title) (\(rule.candidates.count), \(kind))")
@@ -311,7 +314,7 @@ struct CleanupCommand: ParsableCommand {
                 }
                 if !all && rule.candidates.count > 5 { print("    … \(rule.candidates.count - 5) more (--all)") }
             }
-            let empty = report.rules.filter { $0.skipped == nil && $0.candidates.isEmpty }.count
+            let empty = report.rules.filter { $0.skipped == nil && $0.candidates.isEmpty && $0.incomplete == nil }.count
             if empty > 0 { print("- \(empty) rule(s) matched nothing") }
             print("")
             print("\(ByteCount.format(report.bytes)) in \(report.candidates) item(s). Nothing was changed; cleanup plans come next.")
