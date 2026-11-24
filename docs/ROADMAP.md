@@ -148,15 +148,19 @@ Done:
       Parallels jobs, screen lock at 300 s, stealth mode, the three remote-access services) and 3 are unknown
       because macOS leaves those settings unset by default.
 
+- [x] MCP resources (`farrier://plan/{id}`, `farrier://journal/recent`, `farrier://journal/helper`) and progress
+      notifications for tool calls. **Validated** with Claude Code on the macOS 27.2.1 VM: it read the helper journal
+      as a resource (30 entries, chain intact, the undo records with `previous` and `reverts`); it sends a
+      `progressToken` with every tool call, and while the approval prompt was open for `apply_plan` Farrier sent
+      "waiting for the user to approve on the Mac" every 5 s (0–20 s) until the user approved.
+
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
   Developer ID signing
 - Homebrew cask: the tap ([juergen-kc/homebrew-farrier](https://github.com/juergen-kc/homebrew-farrier), with
   `brew style`/`brew audit` CI) exists and the release workflow commits each release's cask to it; it still needs a
   first real (notarized) release to be tested
-- MCP: progress notifications for long calls and the resources `farrier://plan/{id}`, `farrier://journal/recent` and
-  `farrier://journal/helper`: **written, not yet validated with Claude Code.** Still open: the other runbook prompts;
-  validation with Claude Desktop
+- MCP: the other runbook prompts; validation with Claude Desktop
 - `--json` everywhere in the CLI
 - `--redact`
 
