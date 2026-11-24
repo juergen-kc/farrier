@@ -23,8 +23,10 @@ public enum FarrierMCPServer {
         """
 
     /// Runs until the client closes stdin, then lets in-flight calls finish (spike M2b) before returning.
-    public static func run() async throws {
+    /// `redact`: every tool result and resource goes through `RedactionSetup.forThisMac()` first.
+    public static func run(redact: Bool = false) async throws {
         let wire = WireLog.fromEnvironment()
+        let redactor: Redactor? = redact ? RedactionSetup.forThisMac() : nil
         wire?.note("starting pid=\(getpid()) version=\(FarrierVersion.string)")
         let clientName = LockedBox("unknown")
         let inFlight = InFlight()
@@ -65,7 +67,8 @@ public enum FarrierMCPServer {
             }
             defer { ticker?.cancel() }
             // Collection, XPC and the approval prompt block: run them off the cooperative pool.
-            return await offload { ToolCatalog.call(params.name, arguments: params.arguments ?? [:], context: ctx) }
+            let result = await offload { ToolCatalog.call(params.name, arguments: params.arguments ?? [:], context: ctx) }
+            return redactor.map { Self.redacted(result, $0) } ?? result
         }
         await server.withMethodHandler(ListResources.self) { _ in
             .init(resources: ResourceCatalog.list(FarrierContext.live(actor: "mcp:\(clientName.value)")))
@@ -73,7 +76,8 @@ public enum FarrierMCPServer {
         await server.withMethodHandler(ListResourceTemplates.self) { _ in .init(templates: ResourceCatalog.templates) }
         await server.withMethodHandler(ReadResource.self) { params in
             wire?.note("resources/read \(params.uri)")
-            return .init(contents: try ResourceCatalog.read(params.uri, FarrierContext.live(actor: "mcp:\(clientName.value)")))
+            let result = ReadResource.Result(contents: try ResourceCatalog.read(params.uri, FarrierContext.live(actor: "mcp:\(clientName.value)")))
+            return redactor.map { Self.redacted(result, $0) } ?? result
         }
         await server.withMethodHandler(ListPrompts.self) { _ in .init(prompts: Runbooks.prompts) }
         await server.withMethodHandler(GetPrompt.self) { params in try Runbooks.get(params.name, arguments: params.arguments ?? [:]) }
@@ -90,6 +94,15 @@ public enum FarrierMCPServer {
         while inFlight.count > 0 && Date() < deadline { try? await Task.sleep(nanoseconds: 100_000_000) }
         try? await Task.sleep(nanoseconds: 200_000_000)
         wire?.note("stopped")
+    }
+}
+
+extension FarrierMCPServer {
+    /// The same result with every string redacted: encoded, redacted as JSON (which stays valid), decoded again.
+    static func redacted<T: Codable>(_ value: T, _ redactor: Redactor) -> T {
+        guard let data = try? JSONEncoder().encode(value),
+              let back = try? JSONDecoder().decode(T.self, from: redactor.redactJSON(data)) else { return value }
+        return back
     }
 }
 
@@ -308,8 +321,8 @@ public struct StatusOutput: Codable {
     public let problems: [String]
 }
 
-enum Status {
-    static func current() -> StatusOutput {
+public enum Status {
+    public static func current() -> StatusOutput {
         #if os(macOS)
         var problems: [String] = []
         var running: String?

@@ -95,7 +95,10 @@ struct Posture: ParsableCommand {
     @Flag(help: "Output JSON.")
     var json = false
 
+    @OptionGroup var redaction: RedactOption
+
     func run() throws {
+        redaction.apply()
         let out: PostureOutput
         do {
             out = try Operations.posture(try cliContext(rulePaths: rulePaths, factsFile: facts))
@@ -161,7 +164,10 @@ struct Facts: ParsableCommand {
     @Option(help: "Also write the facts (only) as JSON to this file.")
     var save: String?
 
+    @OptionGroup var redaction: RedactOption
+
     func run() throws {
+        redaction.apply()
         let result = Operations.facts(FarrierContext.live(actor: "cli"))
         if let save {
             let encoder = JSONEncoder()
@@ -204,7 +210,10 @@ struct InventoryCommand: ParsableCommand {
     @Flag(help: "Output JSON.")
     var json = false
 
+    @OptionGroup var redaction: RedactOption
+
     func run() throws {
+        redaction.apply()
         let report: InventoryReport
         do {
             report = try Operations.inventory(FarrierContext.live(actor: "cli"),
@@ -256,7 +265,15 @@ struct Helper: ParsableCommand {
 
     struct Status: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Show the helper's registration status, and whether it has Full Disk Access.")
+
+        @Flag(help: "Output JSON: the same as the MCP tool farrier_status (helper, approval key and its age, Full Disk Access, problems).")
+        var json = false
+
+        @OptionGroup var redaction: RedactOption
+
         func run() throws {
+            redaction.apply()
+            if json { return try Output.json(FarrierMCP.Status.current()) }
             try Helper.macOnly()
             #if os(macOS)
             print("helper: \(HelperClient.status)")
@@ -268,10 +285,12 @@ struct Helper: ParsableCommand {
 
     struct Register: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Register the helper (macOS then asks you to approve it).")
+        @Flag(help: "Output JSON.") var json = false
         func run() throws {
             try Helper.macOnly()
             #if os(macOS)
             let (status, message) = HelperClient.register()
+            if json { return try Output.json(RegistrationOutput(status: status, message: message)) }
             print("helper: \(status)")
             if let message { print(message) }
             #endif
@@ -280,10 +299,12 @@ struct Helper: ParsableCommand {
 
     struct Unregister: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Unregister the helper.")
+        @Flag(help: "Output JSON.") var json = false
         func run() throws {
             try Helper.macOnly()
             #if os(macOS)
             let (status, message) = HelperClient.unregister()
+            if json { return try Output.json(RegistrationOutput(status: status, message: message)) }
             print("helper: \(status)")
             if let message { print(message) }
             #endif
@@ -306,6 +327,9 @@ struct Helper: ParsableCommand {
 
         @Flag(help: "Only check; don't open System Settings or wait.")
         var check = false
+
+        @Flag(help: "Output JSON ({ granted, reason }); implies --check.")
+        var json = false
 
         @Option(help: "How long to wait for the grant, in seconds.")
         var timeout: Int = 300
@@ -330,6 +354,15 @@ struct Helper: ParsableCommand {
         func run() throws {
             try Helper.macOnly()
             #if os(macOS)
+            if json {
+                struct Out: Encodable { let granted: Bool?; let reason: String? }
+                switch (try? HelperClient.fullDiskAccess()) {
+                case .success(let g)?: try Output.json(Out(granted: g, reason: nil))
+                case .failure(let u)?: try Output.json(Out(granted: nil, reason: u.reason))
+                case nil: try Output.json(Out(granted: nil, reason: "the helper isn't available"))
+                }
+                return
+            }
             let granted: Bool
             do {
                 try HelperClient.ensureCurrent()
@@ -385,11 +418,13 @@ struct Helper: ParsableCommand {
 
     struct Ping: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Talk to the helper: its version, and whether it runs as root.")
+        @Flag(help: "Output JSON.") var json = false
         func run() throws {
             try Helper.macOnly()
             #if os(macOS)
             do {
                 let info = try HelperClient.hello()
+                if json { return try Output.json(info) }
                 print("helper \(info.version) (protocol \(info.protocolVersion)), pid \(info.pid), euid \(info.euid)")
                 if info.willExit { print("version differs from this farrier (\(FarrierVersion.string)): the helper restarts on the next call") }
             } catch {
@@ -404,11 +439,13 @@ struct Helper: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "whoami",
             abstract: "How the helper sees this caller (console-session check).")
+        @Flag(help: "Output JSON.") var json = false
         func run() throws {
             try Helper.macOnly()
             #if os(macOS)
             do {
                 let d = try HelperClient.whoAmI()
+                if json { return try Output.json(d) }
                 print("accepted: \(d.accepted)  uid \(d.callerEUID)  console user \(d.consoleUser)  session \(d.sessionBits)")
                 for r in d.reasons { print("  - \(r)") }
             } catch {
@@ -418,6 +455,11 @@ struct Helper: ParsableCommand {
             #endif
         }
     }
+}
+
+struct RegistrationOutput: Encodable {
+    let status: String
+    let message: String?
 }
 
 // MARK: - Output

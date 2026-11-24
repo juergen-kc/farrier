@@ -175,8 +175,8 @@ To do:
   `brew style`/`brew audit` CI) exists and the release workflow commits each release's cask to it; it still needs a
   first real (notarized) release to be tested
 - MCP: validation with Claude Desktop; runbooks for tools still to come (why-did-it-wake, free-up-space, …)
-- `--json` everywhere in the CLI
-- `--redact`
+- `--json` on every reporting command and `--redact` (on by default for `farrier mcp`): **written, not yet validated
+  on the VM**
 
 ## v0.2: Cleanup
 
