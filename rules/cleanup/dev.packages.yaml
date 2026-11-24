@@ -1,0 +1,52 @@
+# Package manager caches. See docs/RULE_PACKS.md for the format.
+pack:
+  id: dev.packages
+  title: Package manager caches
+  version: 1
+
+rules:
+  - id: dev.packages.npm
+    title: npm cache
+    kind: cleanup
+    tier: T2
+    targets:
+      - path: ~/.npm/_cacache
+        type: directory
+    regenerable: true
+    minAge: 30d
+    when:
+      processNotRunning: [node, npm]
+    evidence: >
+      Packages npm downloaded before. It downloads them again on the next install that needs them;
+      `npm cache clean --force` removes the same folder.
+
+  - id: dev.packages.cargo
+    title: Cargo download cache
+    kind: cleanup
+    tier: T2
+    targets:
+      - path: ~/.cargo/registry/cache
+        type: directory
+    regenerable: true
+    minAge: 30d
+    when:
+      processNotRunning: [cargo]
+    evidence: >
+      Compressed crates Cargo downloaded. The unpacked sources it builds from stay; Cargo fetches the
+      archives again when it needs them.
+
+  - id: dev.packages.gradle
+    title: Gradle caches
+    kind: cleanup
+    tier: T2
+    targets:
+      - path: ~/.gradle/caches/*
+        type: directory
+    regenerable: true
+    minAge: 30d
+    when:
+      processNotRunning: [java]
+    evidence: >
+      Dependencies and build outputs Gradle cached. The next build downloads and rebuilds what it needs,
+      which takes longer once.
+

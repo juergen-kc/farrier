@@ -36,7 +36,7 @@ public enum RulePackParser {
     static let cleanupKeys: Set<String> = [
         "tier", "targets", "regenerable", "minAge", "minSize", "when", "privileged", "evidence", "references",
     ]
-    static let targetKeys: Set<String> = ["path", "fact", "type", "contains"]
+    static let targetKeys: Set<String> = ["path", "fact", "type", "contains", "exclude"]
     static let whenKeys: Set<String> = ["processNotRunning", "appInstalled", "appNotInstalled"]
     static let remediationKeys: Set<String> = ["automatic", "action", "guidance"]
     static let managedByKeys: Set<String> = ["payloadType", "declarationType", "preference", "keys"]
@@ -271,7 +271,8 @@ public enum RulePackParser {
                 if let t = ctx.string(o, "type", required: false) {
                     if let k = CleanupTarget.Kind(rawValue: t) { type = k } else { ctx.error("target `type` must be file, directory or any") }
                 }
-                targets.append(CleanupTarget(path: path, fact: fact, type: type, contains: ctx.strings(o, "contains")))
+                targets.append(CleanupTarget(path: path, fact: fact, type: type, contains: ctx.strings(o, "contains"),
+                                             exclude: ctx.strings(o, "exclude")))
             }
         } else {
             ctx.error("`targets` must be a non-empty list")

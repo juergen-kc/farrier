@@ -51,6 +51,8 @@ public struct FarrierContext {
     public var exceptions: () -> (exceptions: [PostureException], problem: String?) = { ExceptionStore().load() }
     /// The facts only the inventory needs (apps, system extensions, admins); slower, so not part of `collectFacts`.
     public var collectInventory: () -> CollectionResult = { InventoryCollector().collect() }
+    /// Evaluates cleanup rules against the user's home folder (read-only).
+    public var cleanupScanner: () -> CleanupScanner = { CleanupScanner() }
 
     public init(collectFacts: @escaping () -> CollectionResult, rulePaths: [String], plans: PlanStore, journal: Journal,
                 host: @escaping () -> String, applyThroughHelper: @escaping (Plan) throws -> ApplyReply, actor: String) {
@@ -265,6 +267,25 @@ public enum Operations {
     }
 
     /// What's on this Mac: apps, launch jobs, extensions, profiles, privacy grants, admins, ports. Read-only.
+    /// Read-only: what the cleanup rules match, and how much space it takes. `minAge` (`30d`, `12w`) raises every
+    /// rule's minimum age; it never lowers one.
+    public static func cleanupScan(_ ctx: FarrierContext, ruleIDs: Set<String>? = nil, minAge: String? = nil) throws -> CleanupReport {
+        var age: RuleDuration?
+        if let minAge {
+            guard let d = RuleDuration(minAge) else { throw OperationError("`minAge` must look like 30d, 12w or 48h, got `\(minAge)`") }
+            age = d
+        }
+        let packs = try packs(ctx)
+        if let ruleIDs {
+            let known = Set(packs.flatMap { $0.rules.compactMap { r -> String? in if case .cleanup(let c) = r { return c.id }; return nil } })
+            let unknown = ruleIDs.subtracting(known)
+            guard unknown.isEmpty else {
+                throw OperationError("unknown cleanup rule(s): \(unknown.sorted().joined(separator: ", ")); `farrier rules list` shows them")
+            }
+        }
+        return ctx.cleanupScanner().scan(packs, ruleIDs: ruleIDs, minAge: age)
+    }
+
     public static func inventory(_ ctx: FarrierContext, sections: Set<String>? = nil, flaggedOnly: Bool = false) throws -> InventoryReport {
         if let sections {
             let unknown = sections.subtracting(Inventory.sectionIDs)
