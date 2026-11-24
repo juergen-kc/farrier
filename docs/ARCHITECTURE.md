@@ -332,7 +332,8 @@ counts as a failure. If the access list can't be read, the check fails closed.
 so this check cannot see it. That's why the key is also **rotated every 30 days**: the helper refuses new approvals
 with a key it enrolled 30 or more days ago (it takes the age from its root-owned copy of the public key, which only
 it writes), `farrier setup` replaces a key that's due (from 5 days before), and `farrier apply` and `farrier_status`
-warn in those last days. See
+warn in those last days. Setup never enrolls an existing key again (that would reset its age): if the helper doesn't
+have exactly this account's key with a known enrollment time, it makes a new one. See
 THREAT_MODEL.md, T-3, for the residual risk and the longer-term fix (binding the key's use to Farrier's code identity).
 
 **Apply.** `farrier apply <id>` (or the `apply_plan` tool) loads the plan, checks that the

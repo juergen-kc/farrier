@@ -140,8 +140,9 @@ public enum ApprovalKeyPolicy {
         let seconds = max(0, now - enrolledAt)
         let days = Int(seconds / day)
         if seconds >= Int64(maxAgeDays) * day { return .expired(days: days) }
-        let left = Int((Int64(maxAgeDays) * day - seconds) / day)
-        return left < warnDays ? .dueSoon(daysLeft: left) : .fresh(days: days)
+        // The window starts at exactly maxAgeDays - warnDays (day 25), compared in seconds, not truncated days.
+        guard seconds >= Int64(maxAgeDays - warnDays) * day else { return .fresh(days: days) }
+        return .dueSoon(daysLeft: Int((Int64(maxAgeDays) * day - seconds) / day))
     }
 
     /// The helper's refusal for a key it won't use any more.

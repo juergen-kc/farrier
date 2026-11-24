@@ -86,13 +86,22 @@ public enum ApprovalSetup {
             let problems = ApprovalKey.integrityProblems()
             if !problems.isEmpty { reason = "integrity check failed: \(problems.joined(separator: "; "))" }
         }
-        // Periodic rotation: a key that's due (or past due) is replaced now, not when an approval is refused.
-        if reason == nil, status.enrolled, let enrolledAt = status.enrolledAt {
-            switch ApprovalKeyPolicy.age(enrolledAt: enrolledAt, now: Int64(Date().timeIntervalSince1970)) {
-            case .fresh: break
-            case .dueSoon, .expired:
-                let days = Int((Int64(Date().timeIntervalSince1970) - enrolledAt) / 86_400)
-                reason = "periodic rotation: the key is \(days) days old, and keys are replaced every \(ApprovalKeyPolicy.maxAgeDays) days"
+        // An existing key is never enrolled again: that would reset the helper's enrollment time and give an old (perhaps
+        // disclosed) key another 30 days. So unless the helper has exactly this key, with a known age, a new key is made.
+        if reason == nil {
+            let local = (try? ApprovalKey.publicKey()).map { FarrierCrypto.sha256($0).hexString }
+            if !status.enrolled || status.fingerprint == nil || status.fingerprint != local {
+                reason = status.enrolled ? "the helper has a different key enrolled" : "the helper has no key enrolled"
+            } else if let enrolledAt = status.enrolledAt {
+                // Periodic rotation: a key that's due (or past due) is replaced now, not when an approval is refused.
+                switch ApprovalKeyPolicy.age(enrolledAt: enrolledAt, now: Int64(Date().timeIntervalSince1970)) {
+                case .fresh: break
+                case .dueSoon, .expired:
+                    let days = Int((Int64(Date().timeIntervalSince1970) - enrolledAt) / 86_400)
+                    reason = "periodic rotation: the key is \(days) days old, and keys are replaced every \(ApprovalKeyPolicy.maxAgeDays) days"
+                }
+            } else {
+                reason = "the helper can't say when the key was enrolled"
             }
         }
         report.enrolledAt = status.enrolledAt

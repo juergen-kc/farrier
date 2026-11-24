@@ -13,7 +13,8 @@ struct KeyRotationTests {
         }
         #expect(age(0) == .fresh(days: 0))
         #expect(age(24.9) == .fresh(days: 24))
-        #expect(age(25) == .dueSoon(daysLeft: 5) || age(25) == .fresh(days: 25))   // the edge of the warning window
+        #expect(age(25) == .dueSoon(daysLeft: 5))   // the window starts at exactly day 25
+        #expect(ApprovalKeyPolicy.age(enrolledAt: enrolled, now: enrolled + 25 * day - 1) == .fresh(days: 24))
         #expect(age(26) == .dueSoon(daysLeft: 4))
         #expect(age(29.5) == .dueSoon(daysLeft: 0))
         #expect(age(30) == .expired(days: 30))
