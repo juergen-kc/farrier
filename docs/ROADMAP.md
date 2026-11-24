@@ -162,9 +162,15 @@ Done:
       didn't apply it. Two overconfident claims were traced to the prompt wording and fixed (what each setup step asks;
       that an undo can still be refused when applied).
 
+- [x] Approval key rotation every 30 days, enforced by the helper (it takes the key's age from its root-owned copy and
+      refuses approvals from day 30); `farrier setup` rotates a key that's due (5 days early), `farrier apply` and
+      `farrier_status` warn. **Validated** on the macOS 27.2.1 VM: setup showed the next rotation date (enrollment + 30
+      days); with the key's copy aged to 35 days (`touch`), apply was refused before any prompt with the "enrolled 35
+      days ago" message and nothing changed; `farrier setup` rotated it through the admin dialog; a new plan then
+      applied.
+
 To do:
-- Approval key: periodic rotation every 30 days, enforced by the helper: **written, not yet validated on the VM.**
-  Still open: validation on a physical Mac with Touch ID and Developer ID signing
+- Approval key: validation on a physical Mac with Touch ID and Developer ID signing
 - Homebrew cask: the tap ([juergen-kc/homebrew-farrier](https://github.com/juergen-kc/homebrew-farrier), with
   `brew style`/`brew audit` CI) exists and the release workflow commits each release's cask to it; it still needs a
   first real (notarized) release to be tested

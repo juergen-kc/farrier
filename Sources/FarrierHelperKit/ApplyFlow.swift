@@ -92,7 +92,7 @@ public enum ApprovalSetup {
             case .fresh: break
             case .dueSoon, .expired:
                 let days = Int((Int64(Date().timeIntervalSince1970) - enrolledAt) / 86_400)
-                reason = "periodic rotation: the key is \(days) days old (replaced every \(ApprovalKeyPolicy.maxAgeDays) days)"
+                reason = "periodic rotation: the key is \(days) days old, and keys are replaced every \(ApprovalKeyPolicy.maxAgeDays) days"
             }
         }
         report.enrolledAt = status.enrolledAt
