@@ -105,6 +105,10 @@ from the helper, and are reported as unavailable, with the reason, when it can't
 [docs/FACTS.md](docs/FACTS.md)). On Linux, or to test rules, use
 `swift run farrier posture --facts examples/facts-sample.json`.
 
+Every command that reports something takes `--json`, and those that show this Mac's details take `--redact` (names,
+hosts, the hardware UUID, the MDM server and home folders become placeholders) for output you share. The MCP server
+redacts by default.
+
 `farrier inventory` lists what's on the Mac: apps and launch jobs with their code signature (those that aren't validly
 signed and notarized are marked `!`), system extensions, profiles, privacy grants, admins and listening ports.
 

@@ -161,9 +161,10 @@
 context, and with a hosted model it goes to that provider. Inventories can include usernames,
 hostnames, serial numbers, Wi-Fi network names, app lists and file paths. Mitigations:
 
-- `--redact` / `FARRIER_REDACT=1` (planned default: **on** for MCP) replaces serials, hardware
-  UUIDs, MAC addresses, SSIDs, usernames inside paths, and email-like strings with stable
-  placeholders.
+- **Redaction, on by default for MCP** (`farrier mcp --no-redact` turns it off; the CLI has `--redact` and
+  `FARRIER_REDACT=1`): user and account names, the computer and host names, the hardware UUID, the MDM server,
+  home folders (`/Users/<user>`) and email-like strings become stable placeholders (`<user>`, `<host-id>`, …), in
+  text and JSON alike. Serials, MAC addresses and SSIDs aren't collected yet; they'll be added to it when they are.
 - Tools return summaries first and details on request.
 - The helper can read Mail, Messages and Safari data (it holds Full Disk Access), but **Farrier never returns
   content from them**. At most, a check reports metadata, such as whether a database exists or how large it is.

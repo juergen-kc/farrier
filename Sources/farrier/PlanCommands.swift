@@ -6,7 +6,7 @@ import Foundation
 
 
 func note(_ message: String) {
-    FileHandle.standardError.write(Data("\(message)\n".utf8))
+    FileHandle.standardError.write(Data("\(activeRedactor?.redact(message) ?? message)\n".utf8))
 }
 
 // MARK: - farrier setup
@@ -24,11 +24,18 @@ struct Setup: ParsableCommand {
     @Flag(help: "Replace the key with a new one, even if the current one is intact.")
     var rotate = false
 
+    @Flag(help: "Output JSON.")
+    var json = false
+
     func run() throws {
         try Helper.macOnly()
         #if os(macOS)
         do {
             let report = try ApprovalSetup.run(rotate: rotate)
+            if json {
+                try Output.json(report)
+                return
+            }
             for step in report.steps { print("- \(step)") }
             var ready = "approval key ready: \(report.fingerprint.map { String($0.prefix(16)) + "…" } ?? "?")"
             if let enrolledAt = report.enrolledAt {
@@ -167,7 +174,10 @@ struct PlanShow: ParsableCommand {
     @Flag(help: "Output JSON.")
     var json = false
 
+    @OptionGroup var redaction: RedactOption
+
     func run() throws {
+        redaction.apply()
         if json {
             try Output.json(try Operations.show(FarrierContext.live(actor: "cli"), id: id))
         } else {
@@ -179,8 +189,27 @@ struct PlanShow: ParsableCommand {
 struct PlanList: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "list", abstract: "List saved plans.")
 
+    @Flag(help: "Output JSON.")
+    var json = false
+
+    @OptionGroup var redaction: RedactOption
+
+    struct Row: Encodable { let id: String; let tier: String?; let items: Int?; let expiresAt: Int64?; let expired: Bool?; let error: String? }
+
     func run() throws {
+        redaction.apply()
         let store = PlanStore.default
+        if json {
+            let now = Int64(Date().timeIntervalSince1970)
+            try Output.json(store.ids().map { id -> Row in
+                guard let plan = try? store.load(exactID: id) else {
+                    return Row(id: id, tier: nil, items: nil, expiresAt: nil, expired: nil, error: "unreadable")
+                }
+                return Row(id: id, tier: plan.tier.rawValue, items: plan.items.count, expiresAt: plan.expiresAt,
+                           expired: now >= plan.expiresAt, error: nil)
+            })
+            return
+        }
         for id in store.ids() {
             guard let plan = try? store.load(id) else { print("\(id)  (unreadable)"); continue }
             let expired = Int64(Date().timeIntervalSince1970) >= plan.expiresAt
@@ -200,12 +229,20 @@ struct Apply: ParsableCommand {
     @Argument(help: "Plan id or a unique prefix.")
     var id: String
 
+    @Flag(help: "Output JSON (the per-item results).")
+    var json = false
+
     func run() throws {
         let plan = try PlanStore.default.load(id)
-        printPlan(plan)
+        if !json { printPlan(plan) }
         try Helper.macOnly()
         // The same operation as the MCP tool `apply_plan`, journal entries included.
         let out = try Operations.apply(FarrierContext.live(actor: "cli"), id: plan.id)
+        if json {
+            try Output.json(out)
+            if out.error != nil || out.results.contains(where: { $0.outcome == .failed || $0.outcome == .refused }) { throw ExitCode(1) }
+            return
+        }
         for r in out.results {
             print("\(r.outcome.rawValue.padding(toLength: 16, withPad: " ", startingAt: 0)) \(r.ruleID): \(r.detail ?? "")")
         }
@@ -241,7 +278,22 @@ struct JournalCommand: ParsableCommand {
 struct JournalVerify: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "verify", abstract: "Check both journals' hash chains.")
 
+    @Flag(help: "Output JSON.")
+    var json = false
+
+    struct Row: Encodable { let journal: String; let path: String; let intact: Bool; let entries: Int; let issues: [String] }
+
     func run() throws {
+        if json {
+            let rows = JournalCommand.journals.map { name, journal -> Row in
+                let issues = journal.verify()
+                return Row(journal: name, path: journal.url.path, intact: issues.isEmpty,
+                           entries: (try? journal.entries().count) ?? 0, issues: issues)
+            }
+            try Output.json(rows)
+            if rows.contains(where: { !$0.intact }) { throw ExitCode(1) }
+            return
+        }
         var bad = false
         for (name, journal) in JournalCommand.journals {
             let issues = journal.verify()
@@ -263,8 +315,18 @@ struct JournalShow: ParsableCommand {
     @Option(help: "How many entries.")
     var last = 20
 
+    @Flag(help: "Output JSON (the entries and whether the chain is intact).")
+    var json = false
+
+    @OptionGroup var redaction: RedactOption
+
     func run() throws {
+        redaction.apply()
         let journal = helper ? JournalCommand.journals[1].1 : JournalCommand.journals[0].1
+        if json {
+            try Output.json(Operations.journal(journal, name: helper ? "helper" : "user", last: last))
+            return
+        }
         let formatter = ISO8601DateFormatter()
         for e in try journal.entries().suffix(max(0, last)) {
             let r = e.record
@@ -299,7 +361,10 @@ struct ExceptionsList: ParsableCommand {
     @Flag(help: "Output JSON.")
     var json = false
 
+    @OptionGroup var redaction: RedactOption
+
     func run() throws {
+        redaction.apply()
         let out = Operations.exceptions(FarrierContext.live(actor: "cli"))
         if json { return try Output.json(out) }
         if let problem = out.problem { note(problem) }
@@ -319,9 +384,10 @@ struct ExceptionsAdd: ParsableCommand {
     @Option(help: "The vendor's Apple Team ID (TeamIdentifier, as in `farrier facts`).") var team: String
     @Option(help: "Only this signing identifier of the team.") var identifier: String?
     @Option(help: "Why it's acceptable (shown in the approval prompt and kept with the exception).") var reason: String
+    @Flag(help: "Output JSON.") var json = false
 
     func run() throws {
-        try planAndPrint { ctx in
+        try planAndPrint(json: json) { ctx in
             try Operations.planException(ctx, ruleID: rule, teamID: team, identifier: identifier, reason: reason, remove: false)
         }
     }
@@ -333,15 +399,16 @@ struct ExceptionsRemove: ParsableCommand {
     @Option(help: "The posture rule.") var rule = "posture.core.unsigned-launch-items"
     @Option(help: "The vendor's Apple Team ID.") var team: String
     @Option(help: "The signing identifier, if the exception has one.") var identifier: String?
+    @Flag(help: "Output JSON.") var json = false
 
     func run() throws {
-        try planAndPrint { ctx in
+        try planAndPrint(json: json) { ctx in
             try Operations.planException(ctx, ruleID: rule, teamID: team, identifier: identifier, reason: nil, remove: true)
         }
     }
 }
 
-func planAndPrint(_ make: (FarrierContext) throws -> PlanOutput) throws {
+func planAndPrint(json: Bool = false, _ make: (FarrierContext) throws -> PlanOutput) throws {
     let out: PlanOutput
     do {
         out = try make(FarrierContext.live(actor: "cli"))
@@ -349,6 +416,7 @@ func planAndPrint(_ make: (FarrierContext) throws -> PlanOutput) throws {
         note("\(error)")
         throw ExitCode(2)
     }
+    if json { return try Output.json(out) }
     guard let plan = out.plan else { return print(out.next) }
     printPlan(plan)
     print("\nreview it, then run: farrier apply \(plan.id.prefix(8))")

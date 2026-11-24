@@ -60,7 +60,7 @@ enum AdminAuthorization {
 
 // MARK: - Setup
 
-public struct SetupReport: Sendable {
+public struct SetupReport: Sendable, Codable {
     public var steps: [String] = []
     public var fingerprint: String?
     /// When the key in use was enrolled (now, if this run enrolled one).

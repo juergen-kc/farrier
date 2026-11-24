@@ -169,14 +169,20 @@ Done:
       days ago" message and nothing changed; `farrier setup` rotated it through the admin dialog; a new plan then
       applied.
 
+- [x] `--json` on every reporting command (`helper status --json` = the MCP `farrier_status`) and `--redact` /
+      `FARRIER_REDACT=1`: user and account names, computer and host names, the hardware UUID, the MDM server, home
+      folders and email addresses become placeholders, in text and JSON. On by default for `farrier mcp`
+      (`--no-redact`). **Validated** on a GitHub macOS runner (CI checks the runner's account, home folder and computer
+      name never appear) and the macOS 27.2.1 VM (`facts --redact --json` contained neither the user, the computer
+      name nor the hardware UUID; Claude Code, with redaction on by default, read the placeholders correctly: "your
+      account", `~/Applications`).
+
 To do:
 - Approval key: validation on a physical Mac with Touch ID and Developer ID signing
 - Homebrew cask: the tap ([juergen-kc/homebrew-farrier](https://github.com/juergen-kc/homebrew-farrier), with
   `brew style`/`brew audit` CI) exists and the release workflow commits each release's cask to it; it still needs a
   first real (notarized) release to be tested
 - MCP: validation with Claude Desktop; runbooks for tools still to come (why-did-it-wake, free-up-space, …)
-- `--json` everywhere in the CLI
-- `--redact`
 
 ## v0.2: Cleanup
 
