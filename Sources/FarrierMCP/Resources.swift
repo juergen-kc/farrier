@@ -29,7 +29,8 @@ public enum ResourceCatalog {
                          + "approved and changed, with the state each change replaced.", mimeType: "application/json"),
         ]
         for id in ctx.plans.ids() {
-            guard let plan = try? ctx.plans.load(id), plan.expiresAt > Int64(now.timeIntervalSince1970) else { continue }
+            // One directory listing (`ids()`), then each file read directly: no prefix lookup per plan.
+            guard let plan = try? ctx.plans.load(exactID: id), plan.expiresAt > Int64(now.timeIntervalSince1970) else { continue }
             resources.append(Resource(name: "plan-\(id.prefix(8))", uri: planPrefix + id, title: "Plan \(id.prefix(8))",
                                       description: "\(plan.items.count) item(s), \(plan.tier.rawValue): "
                                           + plan.items.map(\.description).joined(separator: "; "),

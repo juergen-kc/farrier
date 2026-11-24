@@ -30,6 +30,9 @@ struct MCPResourceTests {
         let uris = ResourceCatalog.list(ctx, now: now).map(\.uri)
         #expect(uris == ["farrier://journal/recent", "farrier://journal/helper", "farrier://plan/aaaaaaaa-0000-4000-8000-000000000001"])
         #expect(ResourceCatalog.templates.map(\.uriTemplate) == ["farrier://plan/{id}"])
+        #expect(try ctx.plans.load(exactID: "aaaaaaaa-0000-4000-8000-000000000001").id == "aaaaaaaa-0000-4000-8000-000000000001")
+        #expect(throws: PlanError.self) { try ctx.plans.load(exactID: "aaaa") }   // exact ids only
+        #expect(throws: PlanError.self) { try ctx.plans.load(exactID: "../../etc/passwd") }
     }
 
     @Test func readsPlansAndJournalsAsJSON() throws {
