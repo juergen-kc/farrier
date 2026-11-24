@@ -89,6 +89,14 @@ jobs:
           swift run farrier inventory --section apps --flagged --json \
             | python3 -c 'import json,sys; [print(a["path"]) for x in json.load(sys.stdin)["sections"] for a in x["items"]]' \
             | while read -r app; do spctl --assess --type execute -vv "$app" 2>&1 | tr '\n' ' '; echo; done
+      # --redact on a real Mac: the runner's account, host and home folder must not appear; placeholders must.
+      - name: Redacted output on the runner
+        run: |
+          swift run farrier inventory --section admins --section launchItems --redact
+          swift run farrier facts --redact --json > redacted.json
+          swift run farrier inventory --redact --json >> redacted.json
+          ! grep -n -e "/Users/$USER" -e "\"$USER\"" -e "$(scutil --get ComputerName)" redacted.json
+          grep -q '<user>' redacted.json
       # Without the helper, MDM profiles can't be checked, so nothing may be planned (the firewall is left out).
       - name: Plan on the runner (no helper)
         run: swift run farrier plan posture
