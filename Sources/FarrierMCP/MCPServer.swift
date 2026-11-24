@@ -76,7 +76,7 @@ public enum FarrierMCPServer {
             return .init(contents: try ResourceCatalog.read(params.uri, FarrierContext.live(actor: "mcp:\(clientName.value)")))
         }
         await server.withMethodHandler(ListPrompts.self) { _ in .init(prompts: Runbooks.prompts) }
-        await server.withMethodHandler(GetPrompt.self) { params in try Runbooks.get(params.name) }
+        await server.withMethodHandler(GetPrompt.self) { params in try Runbooks.get(params.name, arguments: params.arguments ?? [:]) }
 
         let transport: any Transport
         if let wire { transport = WireLogTransport(inner: StdioTransport(), wire: wire) } else { transport = StdioTransport() }
@@ -353,29 +353,6 @@ enum Status {
 }
 
 // MARK: - Prompts (runbooks)
-
-enum Runbooks {
-    static let prompts: [Prompt] = [
-        Prompt(name: "security-checkup", title: "Security checkup",
-               description: "Check this Mac's security posture, explain what fails, and offer fixes", arguments: []),
-    ]
-
-    static func get(_ name: String) throws -> GetPrompt.Result {
-        switch name {
-        case "security-checkup":
-            return .init(description: "Security checkup", messages: [
-                .user(.text(text: """
-                    Check this Mac's security posture with the farrier tools. Run posture_check and summarise the \
-                    result by severity. For each failure, use posture_explain to say why it matters and whether \
-                    Farrier can fix it, MDM manages it, or it needs a manual step. If something is fixable, offer to \
-                    plan it with posture_plan_remediation and show the plan; apply it only if I say so.
-                    """)),
-            ])
-        default:
-            throw MCPError.invalidParams("unknown prompt \(name)")
-        }
-    }
-}
 
 // MARK: - Plumbing
 

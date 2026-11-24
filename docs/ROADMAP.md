@@ -160,7 +160,9 @@ To do:
 - Homebrew cask: the tap ([juergen-kc/homebrew-farrier](https://github.com/juergen-kc/homebrew-farrier), with
   `brew style`/`brew audit` CI) exists and the release workflow commits each release's cask to it; it still needs a
   first real (notarized) release to be tested
-- MCP: the other runbook prompts; validation with Claude Desktop
+- MCP runbook prompts: `setup-check`, `software-review`, `privacy-review`, `recent-changes`, `undo-a-change`,
+  `management-overview` (with `security-checkup`): **written, not yet validated with Claude Code.** The rest wait for
+  their tools. Still open: validation with Claude Desktop
 - `--json` everywhere in the CLI
 - `--redact`
 

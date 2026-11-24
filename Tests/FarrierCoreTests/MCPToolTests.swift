@@ -133,7 +133,7 @@ struct MCPToolTests {
     @Test func unknownToolsAndPromptsAreErrors() {
         #expect(ToolCatalog.call("shell_run", arguments: [:], context: FarrierContext.live(actor: "test")).isError == true)
         #expect(throws: (any Error).self) { try Runbooks.get("nope") }
-        #expect(Runbooks.prompts.map(\.name) == ["security-checkup"])
+        #expect(Runbooks.prompts.first?.name == "security-checkup")
     }
 
     @Test func expectationsDescribeThemselves() throws {
