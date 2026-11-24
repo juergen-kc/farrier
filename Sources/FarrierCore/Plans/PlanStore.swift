@@ -35,6 +35,12 @@ public struct PlanStore: Sendable {
         return try Plan.decodeCanonical(Data(contentsOf: directory.appendingPathComponent("\(id).json")))
     }
 
+    /// Loads a plan by its exact id, as `ids()` lists it (no prefix lookup, no directory scan).
+    public func load(exactID id: String) throws -> Plan {
+        guard UUID(uuidString: id) != nil, id == id.lowercased() else { throw PlanError("`\(id)` is not a plan id") }
+        return try Plan.decodeCanonical(Data(contentsOf: directory.appendingPathComponent("\(id).json")))
+    }
+
     public func ids() -> [String] {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         return names.filter { $0.hasSuffix(".json") }.map { String($0.dropLast(5)) }.sorted()

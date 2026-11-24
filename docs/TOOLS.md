@@ -82,10 +82,19 @@ with on-device approval for T3 and T4.
 
 ## Resources
 
-- `farrier://posture/latest`
-- `farrier://snapshot/{id}`
-- `farrier://plan/{id}`
-- `farrier://journal/recent`
+Read-only, as JSON (`application/json`):
+
+- `farrier://plan/{id}` (implemented): a saved plan by id or unique prefix, as `plan_show` returns it. `resources/list`
+  also lists every saved plan that hasn't expired.
+- `farrier://journal/recent` (implemented): the latest 50 entries of the user's journal, and whether the chain is intact.
+- `farrier://journal/helper` (implemented): the same for the privileged helper's journal.
+- `farrier://posture/latest`, `farrier://snapshot/{id}` (planned).
+
+## Progress
+
+A `tools/call` with a `progressToken` in `_meta` gets a `notifications/progress` at once and then every 5 seconds until
+it returns, saying what's happening (for `apply_plan`: waiting for the user to approve on the Mac). Clients that reset
+their timeout on progress then keep waiting while the user decides.
 
 ## Prompts (runbooks)
 

@@ -34,7 +34,8 @@ public enum FarrierMCPServer {
             version: FarrierVersion.string,
             title: "Farrier",
             instructions: instructions,
-            capabilities: .init(prompts: .init(listChanged: false), tools: .init(listChanged: false))
+            capabilities: .init(prompts: .init(listChanged: false), resources: .init(subscribe: false, listChanged: false),
+                                tools: .init(listChanged: false))
         )
         await server.withMethodHandler(ListTools.self) { _ in .init(tools: ToolCatalog.tools) }
         await server.withMethodHandler(CallTool.self) { params in
@@ -42,8 +43,37 @@ public enum FarrierMCPServer {
             defer { inFlight.leave() }
             wire?.note("tools/call \(params.name)")
             let ctx = FarrierContext.live(actor: "mcp:\(clientName.value)")
+            // The client asked for progress: say what's happening every few seconds until the call returns. Clients
+            // that reset their timeout on progress then keep waiting while the user decides at the Mac.
+            let token = params._meta?.progressToken
+            func progress(_ token: ProgressToken, _ tick: Int) async {
+                let message = ToolProgress.message(tool: params.name, seconds: tick * Int(ToolProgress.interval / 1_000_000_000))
+                try? await server.notify(ProgressNotification.message(.init(progressToken: token, progress: Double(tick),
+                                                                             message: message)))
+            }
+            if let token { await progress(token, 0) }   // at once, so even a quick call reports once
+            let ticker: Task<Void, Never>? = token.map { token in
+                Task {
+                    var tick = 1
+                    while !Task.isCancelled {
+                        try? await Task.sleep(nanoseconds: ToolProgress.interval)
+                        if Task.isCancelled { break }
+                        await progress(token, tick)
+                        tick += 1
+                    }
+                }
+            }
+            defer { ticker?.cancel() }
             // Collection, XPC and the approval prompt block: run them off the cooperative pool.
             return await offload { ToolCatalog.call(params.name, arguments: params.arguments ?? [:], context: ctx) }
+        }
+        await server.withMethodHandler(ListResources.self) { _ in
+            .init(resources: ResourceCatalog.list(FarrierContext.live(actor: "mcp:\(clientName.value)")))
+        }
+        await server.withMethodHandler(ListResourceTemplates.self) { _ in .init(templates: ResourceCatalog.templates) }
+        await server.withMethodHandler(ReadResource.self) { params in
+            wire?.note("resources/read \(params.uri)")
+            return .init(contents: try ResourceCatalog.read(params.uri, FarrierContext.live(actor: "mcp:\(clientName.value)")))
         }
         await server.withMethodHandler(ListPrompts.self) { _ in .init(prompts: Runbooks.prompts) }
         await server.withMethodHandler(GetPrompt.self) { params in try Runbooks.get(params.name) }
