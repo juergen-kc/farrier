@@ -172,3 +172,228 @@ rules:
         A launch job that runs a shell, Python or AppleScript script (or an inline command) isn't covered by
         code signing: whoever can change the script changes what runs. Check what each flagged script does and
         who can write it; remove the job if its app is gone.
+
+  # Software update: absent keys are unknown (Apple's default applies), never assumed.
+  - id: posture.core.update-check
+    title: macOS checks for updates automatically
+    kind: check
+    severity: medium
+    collect: { fact: softwareupdate.prefs }
+    expect: { path: AutomaticCheckEnabled, equals: true }
+    managedBy:
+      - payloadType: com.apple.SoftwareUpdate
+      - declarationType: com.apple.configuration.softwareupdate.settings
+      - { preference: com.apple.SoftwareUpdate, keys: [AutomaticCheckEnabled] }
+    remediation:
+      automatic: false
+      guidance: >
+        Turn on "Check for updates" in System Settings → General → Software Update → Automatic Updates (ⓘ).
+    mappings:
+      mscp: system_settings_software_update_enforce
+
+  - id: posture.core.update-download
+    title: New updates are downloaded automatically
+    kind: check
+    severity: low
+    collect: { fact: softwareupdate.prefs }
+    expect: { path: AutomaticDownload, equals: true }
+    managedBy:
+      - payloadType: com.apple.SoftwareUpdate
+      - declarationType: com.apple.configuration.softwareupdate.settings
+      - { preference: com.apple.SoftwareUpdate, keys: [AutomaticDownload] }
+    remediation:
+      automatic: false
+      guidance: >
+        Turn on "Download new updates when available" in System Settings → General → Software Update →
+        Automatic Updates (ⓘ).
+    mappings:
+      mscp: system_settings_software_update_download_enforce
+
+  - id: posture.core.install-macos-updates
+    title: macOS updates install automatically
+    kind: check
+    severity: medium
+    collect: { fact: softwareupdate.prefs }
+    expect: { path: AutomaticallyInstallMacOSUpdates, equals: true }
+    managedBy:
+      - payloadType: com.apple.SoftwareUpdate
+      - declarationType: com.apple.configuration.softwareupdate.settings
+      - { preference: com.apple.SoftwareUpdate, keys: [AutomaticallyInstallMacOSUpdates] }
+    remediation:
+      automatic: false
+      guidance: >
+        Turn on "Install macOS updates" in System Settings → General → Software Update → Automatic Updates (ⓘ).
+        The Mac then restarts on its own to finish an update, usually overnight.
+    mappings:
+      mscp: system_settings_install_macos_updates_enforce
+
+  - id: posture.core.app-store-updates
+    title: App Store apps update automatically
+    kind: check
+    severity: low
+    collect: { fact: softwareupdate.prefs }
+    expect: { path: AutomaticallyInstallAppUpdates, equals: true }
+    managedBy:
+      - payloadType: com.apple.SoftwareUpdate
+      - payloadType: com.apple.commerce
+      - { preference: com.apple.SoftwareUpdate, keys: [AutomaticallyInstallAppUpdates] }
+      - { preference: com.apple.commerce, keys: [AutoUpdate] }
+    remediation:
+      automatic: false
+      guidance: >
+        Turn on "Install application updates from the App Store" in System Settings → General → Software
+        Update → Automatic Updates (ⓘ).
+
+  # System integrity and accounts.
+  - id: posture.core.authenticated-root
+    title: The system volume is sealed (Authenticated Root)
+    kind: check
+    severity: high
+    collect: { fact: sip.authenticatedRoot }
+    expect: { equals: enabled }
+    remediation:
+      automatic: false   # changing it needs Recovery
+      guidance: >
+        Authenticated Root verifies that the system volume hasn't been modified. It's only turned off by hand
+        from Recovery (`csrutil authenticated-root disable`). Unless you know why it is off, turn it back on
+        from Recovery with `csrutil authenticated-root enable` and restart.
+    mappings:
+      mscp: os_authenticated_root_enable
+
+  - id: posture.core.root-account-disabled
+    title: The root account is disabled
+    kind: check
+    severity: high
+    collect: { fact: accounts.rootEnabled }
+    expect: { equals: false }
+    remediation:
+      automatic: false
+      guidance: >
+        An enabled root account is a password away from full control. Disable it in Directory Utility
+        (Edit → Disable Root User) or with `dsenableroot -d`, and use `sudo` from an admin account instead.
+    mappings:
+      mscp: os_root_disable
+
+  - id: posture.core.guest-account-off
+    title: The guest account is off
+    kind: check
+    severity: medium
+    collect: { fact: loginwindow.prefs }
+    expect: { path: GuestEnabled, equals: false }
+    managedBy:
+      - { preference: com.apple.loginwindow, keys: [GuestEnabled] }
+      - { preference: com.apple.MCX, keys: [DisableGuestAccount, EnableGuestAccount] }
+    remediation:
+      automatic: false
+      guidance: >
+        Turn off "Allow guests to log in to this computer" in System Settings → Users & Groups → Guest User.
+    mappings:
+      mscp: system_settings_guest_account_disable
+
+  - id: posture.core.automatic-login-off
+    title: Automatic login is off
+    kind: check
+    severity: high
+    collect: { fact: loginwindow.prefs }
+    expect: { path: autoLogin, equals: false }
+    managedBy:
+      - { preference: com.apple.loginwindow, keys: [autoLoginUser, com.apple.login.mcx.DisableAutoLoginClient] }
+    remediation:
+      automatic: false
+      guidance: >
+        With automatic login, anyone who starts the Mac gets the desktop without a password (and FileVault
+        can't be fully effective). Set "Automatically log in as" to Off in System Settings → Users & Groups.
+    mappings:
+      mscp: system_settings_automatic_login_disable
+
+  - id: posture.core.password-hints-off
+    title: The login window doesn't show password hints
+    kind: check
+    severity: low
+    collect: { fact: loginwindow.prefs }
+    expect: { path: RetriesUntilHint, equals: 0 }
+    managedBy:
+      - { preference: com.apple.loginwindow, keys: [RetriesUntilHint] }
+    remediation:
+      automatic: false
+      guidance: >
+        Turn off "Show password hints" in System Settings → Lock Screen. A hint often gives the password away.
+    mappings:
+      mscp: system_settings_password_hints_disable
+
+  - id: posture.core.screen-lock
+    title: A password is required within 5 seconds of sleep or the screen saver
+    kind: check
+    severity: medium
+    collect: { fact: screenlock }
+    expect:
+      all:
+        - { path: enabled, equals: true }
+        - { path: delaySeconds, lt: 6 }
+    managedBy:
+      - payloadType: com.apple.screensaver
+      - { preference: com.apple.screensaver, keys: [askForPassword, askForPasswordDelay] }
+    remediation:
+      automatic: false
+      guidance: >
+        Set "Require password after screen saver begins or display is turned off" to "Immediately" (or 5
+        seconds) in System Settings → Lock Screen.
+    mappings:
+      mscp: system_settings_screensaver_ask_for_password_delay_enforce
+
+  # Sharing services, from the TCP ports listening on reachable addresses (loopback doesn't count).
+  - id: posture.core.file-sharing-off
+    title: File Sharing (SMB) is off
+    kind: check
+    severity: medium
+    collect: { fact: network.listeningTCP }
+    expect: { each: { notEquals: 445 } }
+    remediation:
+      automatic: false
+      guidance: >
+        If you don't share folders from this Mac, turn off File Sharing in System Settings → General → Sharing.
+        If you do, share only the folders that need it, with specific users, and keep guest access off.
+    mappings:
+      mscp: system_settings_smbd_disable
+
+  - id: posture.core.remote-apple-events-off
+    title: Remote Apple Events are off
+    kind: check
+    severity: medium
+    collect: { fact: network.listeningTCP }
+    expect: { each: { notEquals: 3031 } }
+    remediation:
+      automatic: false
+      guidance: >
+        Remote Apple Events let other Macs run AppleScript on this one. Turn them off in System Settings →
+        General → Sharing unless a script elsewhere needs them.
+    mappings:
+      mscp: system_settings_rae_disable
+
+  - id: posture.core.printer-sharing-off
+    title: Printer Sharing is off
+    kind: check
+    severity: low
+    collect: { fact: network.listeningTCP }
+    expect: { each: { notEquals: 631 } }   # CUPS listens beyond loopback only when printers are shared
+    remediation:
+      automatic: false
+      guidance: >
+        Turn off Printer Sharing in System Settings → General → Sharing unless other computers print through
+        this Mac.
+    mappings:
+      mscp: system_settings_printer_sharing_disable
+
+  - id: posture.core.airplay-receiver-off
+    title: AirPlay Receiver is off
+    kind: check
+    severity: low
+    collect: { fact: network.listeningTCP }
+    expect: { each: { notEquals: 7000 } }
+    remediation:
+      automatic: false
+      guidance: >
+        AirPlay Receiver lets nearby devices stream to this Mac and keeps a network service listening. If you
+        don't use it, turn it off in System Settings → General → AirDrop & Handoff.
+    mappings:
+      mscp: system_settings_airplay_receiver_disable

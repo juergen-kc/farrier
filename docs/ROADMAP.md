@@ -140,6 +140,14 @@ Done:
       privacy grants pointing to Full Disk Access). Still open: login items and background tasks (helper,
       `sfltool dumpbtm`)
 
+- [x] `posture.core`: 25 checks (22 with mSCP mappings). Added: update check, download, macOS and App Store updates;
+      the sealed system volume; the root account; guest account, automatic login, password hints; screen lock within
+      5 seconds; File Sharing, Remote Apple Events, Printer Sharing, AirPlay Receiver. New T0 facts:
+      `sip.authenticatedRoot`, `accounts.rootEnabled`, `screenlock`, `loginwindow.prefs`. **Validated** on a GitHub
+      macOS runner and the macOS 27.2.1 VM: all four facts collected; on the VM 15 pass, 7 fail (FileVault, the
+      Parallels jobs, screen lock at 300 s, stealth mode, the three remote-access services) and 3 are unknown
+      because macOS leaves those settings unset by default.
+
 To do:
 - Approval key: periodic rotation (every 30 days), and validation on a physical Mac with Touch ID and
   Developer ID signing
@@ -148,7 +156,6 @@ To do:
   first real (notarized) release to be tested
 - MCP: progress notifications for long calls; resources (`farrier://plan/{id}`, `farrier://journal/recent`); the
   other runbook prompts; validation with Claude Desktop
-- `posture.core` pack: about 25 high-value checks with mSCP mappings
 - `--json` everywhere in the CLI
 - `--redact`
 
