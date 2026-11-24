@@ -52,6 +52,40 @@ struct PostureCoreTests {
         #expect(none.facts["loginwindow.prefs"] == nil)
     }
 
+    @Test func managedLoginWindowPoliciesWin() {
+        func collect(_ files: [String: Data]) -> FactValue? {
+            SystemCollectors(runner: RecordedRunner([:]), readFile: { files[$0] }, fileExists: { files[$0] != nil })
+                .collect().facts["loginwindow.prefs"]
+        }
+        let local = "/Library/Preferences/com.apple.loginwindow.plist"
+        let managed = "/Library/Managed Preferences/com.apple.loginwindow.plist"
+        let mcx = "/Library/Managed Preferences/com.apple.MCX.plist"
+        // Only a managed plist: its values are used, not dropped.
+        #expect(collect([managed: plist(["GuestEnabled": false, "RetriesUntilHint": 0])])
+                == .object(["GuestEnabled": .bool(false), "RetriesUntilHint": .int(0), "autoLogin": .bool(false)]))
+        // The MCX guest policy beats the login window value, either way.
+        #expect(collect([local: plist(["GuestEnabled": false]), mcx: plist(["EnableGuestAccount": true])])?.object?["GuestEnabled"] == .bool(true))
+        #expect(collect([local: plist(["GuestEnabled": true]), mcx: plist(["DisableGuestAccount": true])])?.object?["GuestEnabled"] == .bool(false))
+        // A managed auto-login user counts; a managed "disable automatic login" beats any user.
+        #expect(collect([local: plist([:]), managed: plist(["autoLoginUser": "kiosk"])])?.object?["autoLogin"] == .bool(true))
+        #expect(collect([local: plist(["autoLoginUser": "juergen"]), managed: plist(["com.apple.login.mcx.DisableAutoLoginClient": true])])?
+                    .object?["autoLogin"] == .bool(false))
+    }
+
+    @Test func appStoreUpdatesFromCommerce() {
+        func prefs(_ files: [String: Data]) -> FactValue? {
+            SystemCollectors(runner: RecordedRunner([:]), readFile: { files[$0] }, fileExists: { files[$0] != nil })
+                .collect().facts["softwareupdate.prefs"]?.object?["AutomaticallyInstallAppUpdates"]
+        }
+        let su = "/Library/Preferences/com.apple.SoftwareUpdate.plist"
+        let commerce = "/Library/Preferences/com.apple.commerce.plist"
+        let commerceManaged = "/Library/Managed Preferences/com.apple.commerce.plist"
+        #expect(prefs([su: plist([:]), commerce: plist(["AutoUpdate": true])]) == .bool(true))       // only commerce: used
+        #expect(prefs([su: plist(["AutomaticallyInstallAppUpdates": false]), commerce: plist(["AutoUpdate": true])]) == .bool(false))
+        #expect(prefs([su: plist(["AutomaticallyInstallAppUpdates": true]), commerceManaged: plist(["AutoUpdate": false])]) == .bool(false))
+        #expect(prefs([su: plist([:])]) == nil)                                                        // neither: unknown
+    }
+
     @Test func newChecksEvaluate() throws {
         #expect(try status("posture.core.authenticated-root", ["sip.authenticatedRoot": .string("enabled")]) == .pass)
         #expect(try status("posture.core.authenticated-root", ["sip.authenticatedRoot": .string("disabled")]) == .fail)

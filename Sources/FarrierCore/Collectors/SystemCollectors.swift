@@ -116,6 +116,8 @@ public struct SystemCollectors: Sendable {
     /// Software update settings: the local preferences, with managed preferences (from a profile) taking precedence.
     static let softwareUpdatePlist = "/Library/Preferences/com.apple.SoftwareUpdate.plist"
     static let softwareUpdateManagedPlist = "/Library/Managed Preferences/com.apple.SoftwareUpdate.plist"
+    static let commercePlist = "/Library/Preferences/com.apple.commerce.plist"
+    static let commerceManagedPlist = "/Library/Managed Preferences/com.apple.commerce.plist"
     static let softwareUpdateKeys = [
         "AutomaticCheckEnabled", "AutomaticDownload", "CriticalUpdateInstall", "ConfigDataInstall",
         "AutomaticallyInstallMacOSUpdates", "AutomaticallyInstallAppUpdates",
@@ -164,27 +166,41 @@ public struct SystemCollectors: Sendable {
 
     static let loginWindowPlist = "/Library/Preferences/com.apple.loginwindow.plist"
     static let loginWindowManagedPlist = "/Library/Managed Preferences/com.apple.loginwindow.plist"
+    static let mcxManagedPlist = "/Library/Managed Preferences/com.apple.MCX.plist"
 
-    /// Login window settings: `{ GuestEnabled, RetriesUntilHint, SHOWFULLNAME, autoLogin }`, managed values first.
-    /// `autoLogin` is whether `autoLoginUser` is set (the user's name isn't kept); the others only when set.
+    /// Login window settings, as in effect: `{ GuestEnabled, RetriesUntilHint, SHOWFULLNAME, autoLogin }`.
+    /// Managed values win: the MCX guest controls (`DisableGuestAccount`, `EnableGuestAccount`) over a managed or local
+    /// `GuestEnabled`; a managed `DisableAutoLoginClient` over any `autoLoginUser`. `autoLogin` says whether automatic
+    /// login is on (the user's name isn't kept); the others only when set. Read when either plist exists.
     func collectLoginWindow(into facts: inout [String: FactValue], notes: inout [CollectionNote]) {
         let fact = "loginwindow.prefs"
         let (local, localProblem) = loadPlist(Self.loginWindowPlist)
         let (managed, managedProblem) = loadPlist(Self.loginWindowManagedPlist)
-        if let problem = managedProblem ?? localProblem {
+        let (mcx, mcxProblem) = loadPlist(Self.mcxManagedPlist)
+        // Managed settings that can't be read could override anything: unknown, not the local values.
+        if let problem = managedProblem ?? mcxProblem ?? localProblem {
             notes.append(CollectionNote(fact: fact, status: .failed, source: Self.loginWindowPlist, detail: problem))
             return
         }
-        guard let local else {
+        guard local != nil || managed != nil || mcx != nil else {
             notes.append(CollectionNote(fact: fact, status: .unavailable, source: Self.loginWindowPlist, detail: "not found"))
             return
         }
-        var o: [String: FactValue] = ["autoLogin": .bool(local["autoLoginUser"]?.string.map { !$0.isEmpty } ?? false)]
+        var o: [String: FactValue] = [:]
         for key in ["GuestEnabled", "RetriesUntilHint", "SHOWFULLNAME"] {
-            if let v = managed?[key] ?? local[key] { o[key] = v }
+            if let v = managed?[key] ?? local?[key] { o[key] = v }
         }
+        if mcx?["DisableGuestAccount"] == .bool(true) {
+            o["GuestEnabled"] = .bool(false)
+        } else if case .bool(let enabled)? = mcx?["EnableGuestAccount"] {
+            o["GuestEnabled"] = .bool(enabled)
+        }
+        let disabledByPolicy = managed?["com.apple.login.mcx.DisableAutoLoginClient"] == .bool(true)
+        let user = (managed?["autoLoginUser"] ?? local?["autoLoginUser"])?.string ?? ""
+        o["autoLogin"] = .bool(!disabledByPolicy && !user.isEmpty)
         facts[fact] = .object(o)
-        notes.append(CollectionNote(fact: fact, status: .collected, source: Self.loginWindowPlist, detail: nil))
+        let source = managed == nil && mcx == nil ? Self.loginWindowPlist : "\(Self.loginWindowPlist) + managed"
+        notes.append(CollectionNote(fact: fact, status: .collected, source: source, detail: nil))
     }
 
     /// `mdm.managedPreferences` alone, parsed (the helper checks it before changing a setting). Nil if unreadable.
@@ -283,6 +299,19 @@ public struct SystemCollectors: Sendable {
                 merged[key] = v
             }
             // Absent keys stay absent: the posture engine reports them as unknown rather than guessing Apple's default.
+        }
+        // App Store updates can also be set as com.apple.commerce's AutoUpdate (managed or local). A managed SoftwareUpdate
+        // key wins, then a managed commerce value, then the local SoftwareUpdate key, then the local commerce value.
+        let appKey = "AutomaticallyInstallAppUpdates"
+        if managed?[appKey] == nil {
+            let (commerceManaged, _) = loadPlist(Self.commerceManagedPlist)
+            let (commerceLocal, _) = loadPlist(Self.commercePlist)
+            if let v = commerceManaged?["AutoUpdate"], v.isBool {
+                merged[appKey] = v
+                managedKeys.append(.string(appKey))
+            } else if merged[appKey] == nil, let v = commerceLocal?["AutoUpdate"], v.isBool {
+                merged[appKey] = v
+            }
         }
         facts[fact] = .object(merged)
         facts["softwareupdate.managedKeys"] = .array(managedKeys)
