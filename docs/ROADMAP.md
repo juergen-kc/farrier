@@ -186,6 +186,9 @@ To do:
 
 ## v0.2: Cleanup
 
+Done so far: the read-only scanner (`farrier cleanup scan`, MCP `cleanup_scan`) with packs for caches, logs, Homebrew
+downloads, npm, Cargo and Gradle caches, next to the Xcode pack.
+
 - Quarantine (user and root), restore, and expiry
 - Cleanup packs: system and user caches, logs, Xcode, simulators, package managers
   (npm/pnpm/yarn/pip/cargo/gradle), Homebrew, Docker, iOS backups, APFS local snapshots (T3)

@@ -13,7 +13,7 @@ struct Farrier: AsyncParsableCommand {
         abstract: "Keep your Mac sound: hygiene, posture, drift, patching and debugging.",
         discussion: "v0.1: rule packs, fact collection, posture evaluation, the privileged helper, and plan → approve → apply for the first fix (firewall). `farrier mcp` serves the same over MCP (stdio).",
         version: version,
-        subcommands: [Posture.self, InventoryCommand.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Undo.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self, Uninstall.self]
+        subcommands: [Posture.self, InventoryCommand.self, CleanupCommand.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Undo.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self, Uninstall.self]
     )
 }
 
@@ -244,6 +244,80 @@ struct InventoryCommand: ParsableCommand {
                 let mark = Inventory.needsALook(item) ? "!" : " "
                 print(" \(mark) \(Inventory.describe(item, section: section.id))")
             }
+        }
+    }
+}
+
+// MARK: - farrier cleanup
+
+struct CleanupCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "cleanup",
+        abstract: "Find caches, old logs and build data that can go.",
+        subcommands: [Scan.self]
+    )
+
+    struct Scan: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "List what the cleanup rules match and how much space it takes. Read-only: nothing is moved.",
+            discussion: """
+            Documents, Desktop, Pictures, Movies, Music, iCloud Drive, Mail, Messages and keychains are never scanned, \
+            whatever a rule says. Sizes are the space on disk; an item's age is the time since anything inside it was \
+            last written or it was last opened.
+            """
+        )
+
+        @Option(name: .customLong("rule"), help: "Only this cleanup rule (repeatable).")
+        var rules: [String] = []
+
+        @Option(help: "Only items unused for at least this long (60d, 12w). Raises each rule's own minimum.")
+        var minAge: String?
+
+        @Flag(help: "List every candidate, not just the largest five per rule.")
+        var all = false
+
+        @Flag(help: "Output JSON.")
+        var json = false
+
+        @OptionGroup var redaction: RedactOption
+
+        func run() throws {
+            redaction.apply()
+            let report: CleanupReport
+            do {
+                report = try Operations.cleanupScan(FarrierContext.live(actor: "cli"),
+                                                    ruleIDs: rules.isEmpty ? nil : Set(rules), minAge: minAge)
+            } catch let error as OperationError {
+                note("\(error)")
+                throw ExitCode(2)
+            }
+            if json {
+                try Output.json(report)
+                return
+            }
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            func short(_ path: String) -> String { path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path }
+            for rule in report.rules {
+                if let skipped = rule.skipped {
+                    print("- \(rule.title): skipped, \(skipped)")
+                    continue
+                }
+                if let n = rule.incomplete {
+                    print("- \(rule.title): \(n) item(s) left out, they couldn't be read completely to tell when they were last used")
+                }
+                guard !rule.candidates.isEmpty else { continue }
+                let kind = rule.regenerable ? "regenerable" : "not regenerable"
+                print("\(ByteCount.format(rule.bytes))  \(rule.title) (\(rule.candidates.count), \(kind))")
+                for c in rule.candidates.prefix(all ? .max : 5) {
+                    let bound = c.sizeIsLowerBound == true ? "≥" : ""
+                    print("    \(bound)\(ByteCount.format(c.bytes).padding(toLength: 9, withPad: " ", startingAt: 0)) \(c.ageDays)d  \(short(c.path))")
+                }
+                if !all && rule.candidates.count > 5 { print("    … \(rule.candidates.count - 5) more (--all)") }
+            }
+            let empty = report.rules.filter { $0.skipped == nil && $0.candidates.isEmpty && $0.incomplete == nil }.count
+            if empty > 0 { print("- \(empty) rule(s) matched nothing") }
+            print("")
+            print("\(ByteCount.format(report.bytes)) in \(report.candidates) item(s). Nothing was changed; cleanup plans come next.")
         }
     }
 }

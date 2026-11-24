@@ -28,7 +28,7 @@ rules:
       - path: ~/Library/Developer/Xcode/DerivedData/*
         type: directory
     regenerable: true              # rebuilt automatically when needed
-    minAge: 14d                    # based on last access (falls back to mtime)
+    minAge: 14d                    # since anything inside was last written or read
     when:
       processNotRunning: [Xcode]   # skip while Xcode is open
     evidence: >
@@ -48,11 +48,18 @@ rules:
 | `targets[].fact` | one of | Targets supplied by a collector (for example `simctl.devices.unavailable`) when a glob can't express them. Bundled packs only. |
 | `targets[].type` | no | `file` \| `directory` \| `any` (default `any`) |
 | `targets[].contains` | no | Marker files that must exist, for example `package.json` next to `node_modules` |
+| `targets[].exclude` | no | Names (globs on the last component) never matched, for example `com.apple.*` under `~/Library/Caches` |
 | `regenerable` | yes | `true` only if the owning app recreates the data without user action |
-| `minAge`, `minSize` | no | Defaults can be overridden per run |
+| `minAge`, `minSize` | no | `minAge` counts from the newest modification of anything inside, or the newest access of a file inside (folder access times aren't used: listing a folder changes them). A run can raise it (`--min-age`), never lower it. |
 | `when` | no | Preconditions: `processNotRunning`, `appInstalled`, `appNotInstalled` (orphan detection) |
 | `privileged` | no | `true` means the helper applies it (bundled packs only) |
 | `evidence` | yes | Plain-language reason it's safe. It is shown in every plan. |
+
+Globs: `*` and `?` match within one component and never match a leading dot; `**` matches any number of folders
+(at most 12). Symlinks are never followed. When several rules match the same path, the target with the longest literal
+prefix keeps it (Homebrew downloads over all caches), and a match inside another match is counted once, with the outer one. A folder that can't be read completely (no permission,
+or more than 200,000 entries) is left out of a rule with a minimum age, because what wasn't seen could be recent; the
+report counts these as `incomplete`.
 
 The hardcoded protected paths (`~/Documents`, `~/Desktop`, `~/Pictures`, `~/Movies`, `~/Music`,
 iCloud Drive, `~/Library/Mobile Documents`, mail and message stores, keychains, and others)

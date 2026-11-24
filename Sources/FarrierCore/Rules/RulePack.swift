@@ -94,6 +94,12 @@ public struct CleanupTarget: Sendable, Hashable {
     public let fact: String?   // targets supplied by a collector
     public let type: Kind
     public let contains: [String]
+    /// Names (globs on the last component) never matched, for example `com.apple.*` under `~/Library/Caches`.
+    public let exclude: [String]
+
+    public init(path: String?, fact: String?, type: Kind, contains: [String], exclude: [String] = []) {
+        self.path = path; self.fact = fact; self.type = type; self.contains = contains; self.exclude = exclude
+    }
 }
 
 public struct CleanupConditions: Sendable, Hashable {

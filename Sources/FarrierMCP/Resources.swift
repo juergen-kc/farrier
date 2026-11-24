@@ -76,6 +76,7 @@ public enum ToolProgress {
         switch tool {
         case "apply_plan": what = "waiting for the user to approve on the Mac (Touch ID or password), then applying"
         case "inventory": what = "collecting the inventory (apps and their signatures)"
+        case "cleanup_scan": what = "measuring caches and logs"
         case "facts_collect": what = "collecting facts"
         case "posture_check": what = "checking posture"
         case "posture_plan_remediation", "posture_plan_exception", "plan_undo": what = "collecting facts and planning"
