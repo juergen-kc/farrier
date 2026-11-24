@@ -9,8 +9,9 @@ private final class FakeHome {
     let root: String
     let now = Date(timeIntervalSince1970: 1_800_000_000)
     init() {
-        root = FileManager.default.temporaryDirectory.appendingPathComponent("farrier-home-\(UUID().uuidString)").path
-        try! FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("farrier-home-\(UUID().uuidString)").path
+        try! FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        root = CleanupScanner.realPath(path)   // macOS: /var/folders/… is /private/var/folders/…
     }
     deinit { try? FileManager.default.removeItem(atPath: root) }
 
@@ -202,6 +203,15 @@ struct CleanupScannerTests {
         #expect((issues + RuleLinter.lint(packs)).filter { $0.level == .error }.isEmpty)
         let ids = Set(packs.flatMap { $0.rules.map(\.id) })
         #expect(ids.isSuperset(of: ["user.library.caches", "user.library.logs", "user.library.homebrew-downloads", "dev.packages.npm"]))
+    }
+
+    @Test func homeBehindASymlinkIsResolved() throws {
+        let home = FakeHome()
+        home.file("real/Library/Caches/app/x", daysAgo: 90)
+        try FileManager.default.createSymbolicLink(atPath: "\(home.root)/link", withDestinationPath: "\(home.root)/real")
+        let p = try pack(packYAML(rule("c", "targets:\n  - path: ~/Library/Caches/*\n")))
+        let s = CleanupScanner(home: "\(home.root)/link", now: home.now, runningProcesses: { [] }, appInstalled: { _ in false })
+        #expect(s.scan([p]).rules[0].candidates.map(\.path) == ["\(home.root)/real/Library/Caches/app"])
     }
 
     @Test func byteCountFormat() {

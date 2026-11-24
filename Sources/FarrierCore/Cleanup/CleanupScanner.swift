@@ -88,11 +88,19 @@ public struct CleanupScanner: Sendable {
                 runningProcesses: @escaping @Sendable () -> Set<String> = CleanupScanner.liveProcesses,
                 appInstalled: @escaping @Sendable (String) -> Bool = CleanupScanner.liveAppInstalled,
                 entryLimit: Int = 200_000) {
-        self.home = home
+        self.home = Self.realPath(home)
         self.now = Int64(now.timeIntervalSince1970)
         self.runningProcesses = runningProcesses
         self.appInstalled = appInstalled
         self.entryLimit = entryLimit
+    }
+
+    /// The home folder with its own symlinks resolved (`/var` is `/private/var` on macOS): links above the home folder
+    /// are the system's, while every link below it is refused.
+    public static func realPath(_ path: String) -> String {
+        guard let resolved = realpath(path, nil) else { return path }
+        defer { free(resolved) }
+        return String(cString: resolved)
     }
 
     /// `minAge` overrides every rule's own minimum age (never below it); `ruleIDs` limits the rules.
