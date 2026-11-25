@@ -36,14 +36,16 @@ extension Planner {
 
     /// Plans moving the scan's candidates into the quarantine: all of them, or only `paths`. Each item records the
     /// path, its fingerprint now, and its size and last use (what the reviewer sees).
-    public static func planCleanup(report: CleanupReport, paths: Set<String>? = nil, host: String, now: Date = Date(),
-                                   ttl: Int64 = Plan.defaultTTL,
+    /// `system`: plan only the privileged rules' candidates (moved by the helper, after approval on the Mac);
+    /// otherwise only the user's own.
+    public static func planCleanup(report: CleanupReport, paths: Set<String>? = nil, system: Bool = false, host: String,
+                                   now: Date = Date(), ttl: Int64 = Plan.defaultTTL,
                                    id: String = UUID().uuidString.lowercased()) -> (plan: Plan?, skipped: [PlanSkip]) {
-        let action = RemediationCatalog.cleanupQuarantine
+        let action = system ? RemediationCatalog.cleanupQuarantineSystem : RemediationCatalog.cleanupQuarantine
         var items: [PlanItem] = []
         var skipped: [PlanSkip] = []
         var planned = Set<String>()
-        for rule in report.rules {
+        for rule in report.rules where (rule.privileged == true) == system {
             if let reason = rule.skipped {
                 if paths == nil { skipped.append(PlanSkip(ruleID: rule.ruleID, reason: reason)) }
                 continue
@@ -192,10 +194,13 @@ public enum CleanupApplier {
     /// candidate of its rule now (the rule exists in a bundled pack, it matches, the item is old enough, no protected
     /// path, no app that rules out the cleanup is running), have the fingerprint it had when planned, sit below no
     /// symlink, and be on the quarantine's volume. Anything else is refused and left where it is.
+    /// `system`: the privileged helper's run, for `cleanup.quarantineSystem` items (with a privileged-only scanner
+    /// and the root quarantine); otherwise the user's own.
     public static func apply(_ plan: Plan, packs: [RulePack], scanner: CleanupScanner, quarantine: Quarantine,
-                             now: Date = Date()) throws -> [CleanupItemResult] {
-        guard plan.items.allSatisfy({ $0.action == RemediationCatalog.cleanupQuarantine.id }) else {
-            throw PlanError("a cleanup plan only holds cleanup items")
+                             system: Bool = false, now: Date = Date()) throws -> [CleanupItemResult] {
+        let action = system ? RemediationCatalog.cleanupQuarantineSystem.id : RemediationCatalog.cleanupQuarantine.id
+        guard plan.items.allSatisfy({ $0.action == action }) else {
+            throw PlanError(system ? "a system cleanup plan only holds system cleanup items" : "a cleanup plan only holds cleanup items")
         }
         let bundled = packs.filter { $0.source == .bundled }
         let ruleIDs = Set(plan.items.map(\.ruleID))
@@ -360,21 +365,28 @@ extension Planner {
     public static func planExpiry(quarantine: Quarantine, planIDs: [String]? = nil, host: String, now: Date = Date(),
                                   ttl: Int64 = Plan.defaultTTL,
                                   id: String = UUID().uuidString.lowercased()) -> (plan: Plan?, skipped: [PlanSkip]) {
-        let t = Int64(now.timeIntervalSince1970)
-        let action = RemediationCatalog.quarantineExpire
-        var items: [PlanItem] = []
-        var skipped: [PlanSkip] = []
         let manifests: [QuarantineManifest]
+        var missing: [String] = []
         if let planIDs {
             manifests = planIDs.compactMap { pid in
-                do { return try quarantine.load(pid) } catch {
-                    skipped.append(PlanSkip(ruleID: "quarantine", reason: "\(pid.prefix(8)): no such quarantined plan"))
-                    return nil
-                }
+                do { return try quarantine.load(pid) } catch { missing.append(pid); return nil }
             }
         } else {
             manifests = quarantine.list()
         }
+        return planExpiry(manifests: manifests, missing: missing, named: planIDs != nil, system: false, host: host,
+                          now: now, ttl: ttl, id: id)
+    }
+
+    /// Plans deleting from manifests read elsewhere (the system quarantine, through the helper).
+    public static func planExpiry(manifests: [QuarantineManifest], missing: [String] = [], named: Bool, system: Bool,
+                                  host: String, now: Date = Date(), ttl: Int64 = Plan.defaultTTL,
+                                  id: String = UUID().uuidString.lowercased()) -> (plan: Plan?, skipped: [PlanSkip]) {
+        let t = Int64(now.timeIntervalSince1970)
+        let action = system ? RemediationCatalog.quarantineExpireSystem : RemediationCatalog.quarantineExpire
+        let planIDs: [String]? = named ? [] : nil
+        var items: [PlanItem] = []
+        var skipped = missing.map { PlanSkip(ruleID: "quarantine", reason: "\($0.prefix(8)): no such quarantined plan") }
         for m in manifests {
             let held = m.held
             if held.isEmpty {
@@ -419,8 +431,9 @@ extension CleanupApplier {
     /// must still hold exactly what the expiry plan says (same number of items and bytes), and its folder must be
     /// a real folder inside the quarantine (no symlink anywhere on the way).
     public static func expire(_ plan: Plan, quarantine: Quarantine, now: Date = Date()) throws -> [CleanupItemResult] {
-        guard plan.items.allSatisfy({ $0.action == RemediationCatalog.quarantineExpire.id }) else {
-            throw PlanError("an expiry plan only holds expiry items")
+        let expiry = [RemediationCatalog.quarantineExpire.id, RemediationCatalog.quarantineExpireSystem.id]
+        guard let first = plan.items.first?.action, expiry.contains(first), plan.items.allSatisfy({ $0.action == first }) else {
+            throw PlanError("an expiry plan only holds expiry items of one kind")
         }
         var results: [CleanupItemResult] = []
         for item in plan.items {
@@ -469,5 +482,51 @@ extension CleanupApplier {
             guard unlink(path) == 0 else { return "\(String(cString: strerror(errno))) (\(path))" }
         }
         return nil
+    }
+}
+
+
+extension Planner {
+    /// Plans putting a system quarantine's items back (all of them). T2, but the helper does it, so the user approves
+    /// on the Mac. Records what it holds, like an expiry; the helper refuses if that changed.
+    public static func planSystemRestore(manifest m: QuarantineManifest, host: String, now: Date = Date(),
+                                         ttl: Int64 = Plan.defaultTTL,
+                                         id: String = UUID().uuidString.lowercased()) -> Plan? {
+        guard !m.held.isEmpty else { return nil }
+        let action = RemediationCatalog.quarantineRestoreSystem
+        let item = PlanItem(ruleID: "quarantine", action: action.id, tier: action.tier, summary: action.summary, fact: action.fact,
+                            observed: .object(["items": .int(m.held.count), "bytes": .int(Int(m.quarantinedBytes)),
+                                               "expiresAt": .int(Int(m.expiresAt))]),
+                            parameters: ["plan": m.planID])
+        let created = Int64(now.timeIntervalSince1970)
+        return Plan(id: id, createdAt: created, expiresAt: created + ttl, host: host, items: [item])
+    }
+}
+
+extension Quarantine {
+    /// The root-only quarantine the privileged helper moves system items into (0700, root).
+    public static let system = Quarantine(root: "/Library/Application Support/Farrier/Quarantine")
+}
+
+extension CleanupApplier {
+    /// The helper's restore for a `quarantine.restoreSystem` item: refuses if the quarantine holds something else
+    /// than planned, then puts everything back.
+    public static func restoreSystem(_ item: PlanItem, quarantine: Quarantine) -> [CleanupItemResult] {
+        guard item.action == RemediationCatalog.quarantineRestoreSystem.id,
+              let planID = try? QuarantineExpiryRules.validate(item.parameters) else {
+            return [CleanupItemResult(ruleID: item.ruleID, path: "?", outcome: .refused, detail: "not a system restore item")]
+        }
+        let folder = quarantine.folder(planID)
+        let single = Plan(id: planID, createdAt: 0, expiresAt: .max, host: "", items: [
+            PlanItem(ruleID: item.ruleID, action: RemediationCatalog.quarantineExpireSystem.id, tier: .t3,
+                     summary: RemediationCatalog.quarantineExpireSystem.summary, fact: item.fact, observed: item.observed,
+                     parameters: item.parameters),
+        ])
+        if let problem = expiryProblems(single, quarantine: quarantine)[planID] {
+            return [CleanupItemResult(ruleID: item.ruleID, path: folder, outcome: .refused, detail: problem)]
+        }
+        do { return try restore(planID: planID, quarantine: quarantine) } catch {
+            return [CleanupItemResult(ruleID: item.ruleID, path: folder, outcome: .failed, detail: "\(error)")]
+        }
     }
 }

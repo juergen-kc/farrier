@@ -248,6 +248,19 @@ extension HelperService {
                                                       error: "nothing changed: the helper's journal can't be written (\(error))")))
         }
 
+        // System cleanup: moved, restored or deleted here, as root, in one batch (one rescan for all items).
+        if approved.items.contains(where: { RemediationCatalog.action($0.action)?.privileged == true }) {
+            let results = SystemCleanup.apply(approved)
+            for r in results {
+                helperLog("plan \(approved.id) \(r.action): \(r.outcome.rawValue) \(r.detail ?? "")")
+                if let error = Self.record(approved.id, hashHex, r.outcome.rawValue, ruleID: r.ruleID, action: r.action, detail: r.detail) {
+                    return reply(HelperWire.encode(ApplyReply(planID: approved.id, results: results,
+                                                              error: "the helper's journal can't be written (\(error))")))
+                }
+            }
+            return reply(HelperWire.encode(ApplyReply(planID: approved.id, results: results, error: nil)))
+        }
+
         var results: [ItemResult] = []
         for item in approved.items {
             lifecycle.touch()
@@ -267,6 +280,24 @@ extension HelperService {
             }
         }
         reply(HelperWire.encode(ApplyReply(planID: approved.id, results: results, error: nil)))
+    }
+
+    func scanSystemCleanup(clientVersion: String, reply: @escaping (Data) -> Void) {
+        if let refusal = gate(clientVersion, "scanSystemCleanup") {
+            return reply(HelperWire.encode(SystemScanReply(report: nil, error: refusal)))
+        }
+        do {
+            reply(HelperWire.encode(SystemScanReply(report: try SystemCleanup.scan(), error: nil)))
+        } catch {
+            reply(HelperWire.encode(SystemScanReply(report: nil, error: "\(error)")))
+        }
+    }
+
+    func listSystemQuarantine(clientVersion: String, reply: @escaping (Data) -> Void) {
+        if let refusal = gate(clientVersion, "listSystemQuarantine") {
+            return reply(HelperWire.encode(SystemQuarantineReply(manifests: nil, error: refusal)))
+        }
+        reply(HelperWire.encode(SystemQuarantineReply(manifests: Quarantine.system.list(), error: nil)))
     }
 
     /// Writes root:wheel 0644 explicitly (in the spike, the group was otherwise inherited as admin), in a

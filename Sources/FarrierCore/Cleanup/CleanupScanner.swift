@@ -30,9 +30,18 @@ public struct CleanupRuleResult: Sendable, Codable {
     public let bytes: Int64
     /// Why the rule didn't run (an app is running, its targets need a collector, …); nil when it did.
     public let skipped: String?
+    /// The rule covers system locations, which the privileged helper scans and moves.
+    public var privileged: Bool? = nil
     /// Matches left out because they couldn't be read completely (no permission, or more entries than the scan
     /// counts), so when they were last used isn't known. Nil when there were none.
     public let incomplete: Int?
+
+    public init(ruleID: String, title: String, tier: Tier, regenerable: Bool, evidence: String, minAgeDays: Int?,
+                candidates: [CleanupCandidate], bytes: Int64, skipped: String?, incomplete: Int?) {
+        self.ruleID = ruleID; self.title = title; self.tier = tier; self.regenerable = regenerable
+        self.evidence = evidence; self.minAgeDays = minAgeDays; self.candidates = candidates; self.bytes = bytes
+        self.skipped = skipped; self.incomplete = incomplete
+    }
 }
 
 public struct CleanupReport: Sendable, Codable {
@@ -40,6 +49,10 @@ public struct CleanupReport: Sendable, Codable {
     /// What the candidates take up together. Nothing is freed until they're quarantined and the quarantine expires.
     public let bytes: Int64
     public let candidates: Int
+
+    public init(rules: [CleanupRuleResult], bytes: Int64, candidates: Int) {
+        self.rules = rules; self.bytes = bytes; self.candidates = candidates
+    }
 }
 
 /// What the scanner needs from the file system, so tests can use a temporary folder and the real code paths.
@@ -102,6 +115,8 @@ public struct CleanupScanner: Sendable {
     public let appInstalled: @Sendable (String) -> Bool
     /// The most entries counted inside one candidate before its size is reported as a lower bound.
     public let entryLimit: Int
+    /// The privileged helper's scan: only privileged rules, which it evaluates as root. Otherwise they're skipped.
+    public var privilegedOnly = false
 
     public init(home: String = FileManager.default.homeDirectoryForCurrentUser.path, now: Date = Date(),
                 runningProcesses: @escaping @Sendable () -> Set<String> = CleanupScanner.liveProcesses,
@@ -129,7 +144,7 @@ public struct CleanupScanner: Sendable {
         var pending: [(rule: CleanupRule, found: [CleanupCandidate], skipped: String?, incomplete: Int)] = []
         lazy var processes = runningProcesses()
         for pack in packs {
-            for case .cleanup(let rule) in pack.rules where ruleIDs?.contains(rule.id) ?? true {
+            for case .cleanup(let rule) in pack.rules where (ruleIDs?.contains(rule.id) ?? true) && (!privilegedOnly || rule.privileged) {
                 if let reason = skipReason(rule, processes: &processes) {
                     pending.append((rule, [], reason, 0)); continue
                 }
@@ -172,18 +187,20 @@ public struct CleanupScanner: Sendable {
         for (rule, found, skipped, incomplete) in pending {
             var seen = Set<String>()
             let kept = found.filter { claimed[$0.path]?.rule == rule.id && !insideAnother($0.path) && seen.insert($0.path).inserted }.sorted { $0.bytes > $1.bytes }
-            results.append(CleanupRuleResult(
+            var result = CleanupRuleResult(
                 ruleID: rule.id, title: rule.title, tier: rule.tier, regenerable: rule.regenerable,
                 evidence: rule.evidence.trimmingCharacters(in: .whitespacesAndNewlines),
                 minAgeDays: rule.minAge.map { Int($0.seconds / 86_400) }, candidates: kept,
-                bytes: kept.reduce(0) { $0 + $1.bytes }, skipped: skipped, incomplete: incomplete > 0 ? incomplete : nil))
+                bytes: kept.reduce(0) { $0 + $1.bytes }, skipped: skipped, incomplete: incomplete > 0 ? incomplete : nil)
+            result.privileged = rule.privileged ? true : nil
+            results.append(result)
         }
         let all = results.flatMap(\.candidates)
         return CleanupReport(rules: results, bytes: all.reduce(0) { $0 + $1.bytes }, candidates: all.count)
     }
 
     func skipReason(_ rule: CleanupRule, processes: inout Set<String>) -> String? {
-        if rule.privileged { return "needs the privileged helper (not part of cleanup yet)" }
+        if rule.privileged && !privilegedOnly { return "system location: the privileged helper scans it" }
         if let running = rule.when.processNotRunning.first(where: { processes.contains($0) }) {
             return "\(running) is running"
         }

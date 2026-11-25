@@ -8,7 +8,7 @@ public enum HelperConstants {
     public static let machService = "dev.farrier.helper"       // launchd label and Mach service
     public static let daemonPlist = "dev.farrier.helper.plist" // Farrier.app/Contents/Library/LaunchDaemons/
     /// Bumped when the XPC protocol changes incompatibly.
-    public static let protocolVersion = 6
+    public static let protocolVersion = 7
     /// What the version handshake compares: the build version AND the protocol, so a protocol change restarts a
     /// running helper even when the version string stays the same (as it does between development builds).
     public static var handshakeVersion: String { "\(FarrierVersion.string)+p\(protocolVersion)" }
@@ -215,6 +215,20 @@ public enum HelperWire {
     }
 }
 
+/// `scanSystemCleanup`: the privileged rules' scan, run as root with the helper's own bundled packs.
+public struct SystemScanReply: Codable, Sendable {
+    public let report: CleanupReport?
+    public let error: String?
+    public init(report: CleanupReport?, error: String?) { self.report = report; self.error = error }
+}
+
+/// `listSystemQuarantine`: the root-only quarantine's manifests.
+public struct SystemQuarantineReply: Codable, Sendable {
+    public let manifests: [QuarantineManifest]?
+    public let error: String?
+    public init(manifests: [QuarantineManifest]?, error: String?) { self.manifests = manifests; self.error = error }
+}
+
 #if os(macOS)
 /// The XPC interface. Every call carries the client's version (handshake). Replies are JSON (`HelperWire`).
 @objc public protocol FarrierHelperProtocol {
@@ -233,5 +247,9 @@ public enum HelperWire {
     // call, so an approval can never be detached from the plan it covers.
     func beginApproval(planHash: Data, clientVersion: String, reply: @escaping (Data) -> Void)
     func applyPlan(plan: Data, payload: Data, signature: Data, clientVersion: String, reply: @escaping (Data) -> Void)
+
+    // System cleanup (read-only; moving, restoring and deleting go through `applyPlan` with an approval).
+    func scanSystemCleanup(clientVersion: String, reply: @escaping (Data) -> Void)
+    func listSystemQuarantine(clientVersion: String, reply: @escaping (Data) -> Void)
 }
 #endif

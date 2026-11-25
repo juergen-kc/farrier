@@ -216,6 +216,7 @@ public enum ToolCatalog {
                  "ruleIDs": ["type": "array", "items": ["type": "string"], "description": "Only these cleanup rules (default: all)"],
                  "minAge": ["type": "string", "description": "Only items unused for at least this long, e.g. 60d (raises each rule's minimum)"],
                  "paths": ["type": "array", "items": ["type": "string"], "description": "Only these candidate paths, as cleanup_scan lists them"],
+                 "system": ["type": "boolean", "description": "Plan the system locations' candidates instead (/Library/Caches, /Library/Logs: rules marked privileged). The privileged helper moves them, and applying asks the user for Touch ID or their password on the Mac"],
              ]),
              annotations: .init(title: "Plan a cleanup", readOnlyHint: false, destructiveHint: false,
                                 idempotentHint: false, openWorldHint: false)),
@@ -228,7 +229,8 @@ public enum ToolCatalog {
         Tool(name: "quarantine_restore", title: "Restore from the quarantine",
              description: "Put a cleanup plan's quarantined items back where they were: all of them, or only `paths` "
                  + "(original paths). Only when the user asks. An item whose original path is taken again is left in the "
-                 + "quarantine, with the reason.",
+                 + "quarantine, with the reason. For a plan in the system quarantine, everything goes back at once, and the "
+                 + "privileged helper does it after the user approves on the Mac (Touch ID or password).",
              inputSchema: schema(["planID": planID,
                                   "paths": ["type": "array", "items": ["type": "string"], "description": "Only these original paths"]],
                                  required: ["planID"]),
@@ -239,7 +241,8 @@ public enum ToolCatalog {
                  + "plan past its 7 days, or only `planIDs` (also before then). It can't be undone: only when the user asks. "
                  + "Nothing is deleted until apply_plan, which asks the user for Touch ID or their password on the Mac.",
              inputSchema: schema(["planIDs": ["type": "array", "items": ["type": "string"],
-                                              "description": "Cleanup plan ids or prefixes, as quarantine_list shows them (default: all past their 7 days)"]]),
+                                              "description": "Cleanup plan ids or prefixes, as quarantine_list shows them (default: all past their 7 days)"],
+                                  "system": ["type": "boolean", "description": "The system quarantine (quarantine_list marks its plans `system`) instead of the user's"]]),
              annotations: .init(title: "Plan emptying the quarantine", readOnlyHint: false, destructiveHint: false,
                                 idempotentHint: false, openWorldHint: false)),
         Tool(name: "exceptions_list", title: "List posture exceptions",
@@ -294,9 +297,11 @@ public enum ToolCatalog {
             case "cleanup_plan":
                 return try result(Operations.planCleanup(ctx, ruleIDs: try stringSet(args["ruleIDs"]),
                                                          minAge: try optionalString(args, "minAge"),
-                                                         paths: try stringSet(args["paths"], "paths")))
+                                                         paths: try stringSet(args["paths"], "paths"),
+                                                         system: try optionalBool(args, "system") ?? false))
             case "quarantine_plan_expiry":
-                return try result(Operations.planExpiry(ctx, ids: try stringSet(args["planIDs"], "planIDs").map { $0.sorted() }))
+                return try result(Operations.planExpiry(ctx, ids: try stringSet(args["planIDs"], "planIDs").map { $0.sorted() },
+                                                        system: try optionalBool(args, "system") ?? false))
             case "quarantine_list":
                 return try result(Operations.quarantineList(ctx, details: try optionalBool(args, "details") ?? false))
             case "quarantine_restore":

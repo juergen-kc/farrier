@@ -78,6 +78,10 @@ public enum RuleLinter {
         "~/Library/Developer/CoreSimulator/Caches",
     ]
 
+    /// Where privileged (root) cleanup rules may point, bundled packs included: system caches and logs, never
+    /// anything else the helper could reach as root.
+    public static let systemCleanupRoots = ["/Library/Caches", "/Library/Logs"]
+
     public static func lint(_ packs: [RulePack]) -> [LintIssue] {
         var issues: [LintIssue] = []
         var seen: [String: String] = [:]  // rule id → file
@@ -111,6 +115,25 @@ public enum RuleLinter {
                             if let root = ProtectedPaths.conflict(for: path) {
                                 error("target `\(path)` can reach the protected path `\(root)`")
                             }
+                        }
+                    }
+                    if c.privileged {
+                        if c.tier != .t2 { error("privileged cleanup must be T2 (it goes to the system quarantine)") }
+                        for target in c.targets {
+                            if target.fact != nil { error("privileged rules cannot use collector `fact` targets") }
+                            if let path = target.path {
+                                let prefix = ProtectedPaths.normalize(ProtectedPaths.literalPrefix(of: path))
+                                // Inside a root, and never the root folder itself.
+                                let inside = systemCleanupRoots.contains { ProtectedPaths.isSameOrInside(prefix, $0) }
+                                let isRoot = systemCleanupRoots.contains { ProtectedPaths.normalize(path).lowercased() == $0.lowercased() }
+                                if !inside || isRoot {
+                                    error("privileged target must be inside \(systemCleanupRoots.joined(separator: " or ")): \(path)")
+                                }
+                            }
+                        }
+                    } else {
+                        for target in c.targets where target.path?.hasPrefix("/") == true {
+                            error("system paths need `privileged: true` (the helper moves them): \(target.path!)")
                         }
                     }
                     if pack.source == .user {

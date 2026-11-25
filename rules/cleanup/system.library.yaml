@@ -1,0 +1,35 @@
+# System caches and logs, outside any home folder. The privileged helper scans and moves them (into the
+# root-only quarantine), after the user approves on the Mac. See docs/RULE_PACKS.md for the format.
+pack:
+  id: system.library
+  title: System caches and logs
+  version: 1
+
+rules:
+  - id: system.library.caches
+    title: System caches not used for 30 days
+    kind: cleanup
+    tier: T2
+    privileged: true
+    targets:
+      - path: /Library/Caches/*
+        exclude: ["com.apple.*", "Homebrew", "ColorSync"]
+    regenerable: true
+    minAge: 30d
+    evidence: >
+      Caches that apps and installers keep for every user, which they rebuild when missing. Only caches nothing
+      has written to or read for 30 days are listed, and Apple's own are left alone.
+
+  - id: system.library.logs
+    title: System logs not written for 30 days
+    kind: cleanup
+    tier: T2
+    privileged: true
+    targets:
+      - path: /Library/Logs/*
+        exclude: ["DiagnosticReports", "com.apple.*", "CrashReporter"]
+    regenerable: false            # nothing recreates old logs; crash reports are kept
+    minAge: 30d
+    evidence: >
+      Logs that installers and system services wrote and no longer write to. They only help when looking into a
+      problem from that time; crash reports are never listed.
