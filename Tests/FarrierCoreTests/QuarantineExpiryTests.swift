@@ -77,6 +77,8 @@ struct QuarantineExpiryTests {
         // Nothing to restore, and nothing left to expire.
         let r = try CleanupApplier.restore(planID: q.cleanup.id, paths: [after.items[0].original], quarantine: q.quarantine)
         #expect(r[0].detail.contains("deleted for good"))
+        let all = try CleanupApplier.restore(planID: q.cleanup.id, quarantine: q.quarantine)
+        #expect(all.count == 1 && all[0].detail == "nothing left to restore: its items were deleted for good")
         #expect(Planner.planExpiry(quarantine: q.quarantine, host: "H", now: q.afterRetention).plan == nil)
     }
 
@@ -131,7 +133,12 @@ struct QuarantineExpiryTests {
         let approved = try ToolCatalog.call("apply_plan", arguments: ["planID": .string(planID)], context: ctx)
         #expect(approved.isError != true)
         #expect(try q.quarantine.load(q.cleanup.id).held.isEmpty)
+        // Applying it again: nothing to delete, so nobody is asked.
+        var askedAgain = false
+        ctx.approveInProcess = { _ in askedAgain = true }
+        let again = try ToolCatalog.call("apply_plan", arguments: ["planID": .string(planID)], context: ctx)
+        #expect(again.isError == true && !askedAgain)
         let outcomes = try ctx.journal.entries().map(\.record.outcome)
-        #expect(outcomes == ["planned", "notApplied", "approved", "applied"])
+        #expect(outcomes == ["planned", "notApplied", "approved", "applied", "notApplied"])
     }
 }

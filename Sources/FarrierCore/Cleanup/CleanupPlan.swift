@@ -298,7 +298,7 @@ public enum CleanupApplier {
                 continue
             }
             if item.state == .deleted {
-                if paths != nil { result(.refused, "deleted for good when the quarantine expired") }
+                if paths != nil { result(.refused, "it was deleted for good (the quarantine was emptied)") }
                 continue
             }
             let stored = "\(folder)/\(item.stored)"
@@ -328,7 +328,10 @@ public enum CleanupApplier {
         }
         try quarantine.save(manifest)
         if results.isEmpty {
-            results.append(CleanupItemResult(ruleID: "-", path: folder, outcome: .refused, detail: "nothing left to restore"))
+            let deleted = manifest.items.contains { $0.state == .deleted }
+            results.append(CleanupItemResult(ruleID: "-", path: folder, outcome: .refused,
+                                             detail: deleted ? "nothing left to restore: its items were deleted for good"
+                                                             : "nothing left to restore"))
         }
         return results
     }
@@ -392,6 +395,26 @@ extension Planner {
 }
 
 extension CleanupApplier {
+    /// Why each item of an expiry plan would be refused now, by cleanup plan id; empty when all can go ahead. Checked
+    /// before the approval prompt too, so nobody is asked to approve a plan that can't do anything.
+    public static func expiryProblems(_ plan: Plan, quarantine: Quarantine) -> [String: String] {
+        var problems: [String: String] = [:]
+        for item in plan.items {
+            guard let planID = try? QuarantineExpiryRules.validate(item.parameters) else { continue }
+            let folder = quarantine.folder(planID)
+            guard let m = try? quarantine.load(planID) else { problems[planID] = "no such quarantined plan any more"; continue }
+            let o = item.observed.object ?? [:]
+            if m.held.isEmpty {
+                problems[planID] = "nothing to delete any more (deleted or restored since)"
+            } else if m.held.count != Int(o["items"]?.number ?? -1) || Int(m.quarantinedBytes) != Int(o["bytes"]?.number ?? -1) {
+                problems[planID] = "it holds something else than when this was planned (restored since?); make a new plan"
+            } else if CleanupScanner.realPath(folder) != folder || FileStat.lstat(folder)?.isSymlink != false {
+                problems[planID] = "the quarantine folder isn't where it should be (a symlink?)"
+            }
+        }
+        return problems
+    }
+
     /// Deletes what an expiry plan covers. The caller has had the plan approved on the Mac. Each quarantined plan
     /// must still hold exactly what the expiry plan says (same number of items and bytes), and its folder must be
     /// a real folder inside the quarantine (no symlink anywhere on the way).
@@ -407,14 +430,9 @@ extension CleanupApplier {
             let planID: String
             do { planID = try QuarantineExpiryRules.validate(item.parameters) } catch { result(.refused, "?", "\(error)"); continue }
             let folder = quarantine.folder(planID)
+            let single = Plan(id: plan.id, createdAt: plan.createdAt, expiresAt: plan.expiresAt, host: plan.host, items: [item])
+            if let problem = expiryProblems(single, quarantine: quarantine)[planID] { result(.refused, folder, problem); continue }
             guard var m = try? quarantine.load(planID) else { result(.refused, folder, "no such quarantined plan any more"); continue }
-            let o = item.observed.object ?? [:]
-            guard m.held.count == Int(o["items"]?.number ?? -1), Int(m.quarantinedBytes) == Int(o["bytes"]?.number ?? -1) else {
-                result(.refused, folder, "it holds something else than when this was planned (restored since?); make a new plan"); continue
-            }
-            guard CleanupScanner.realPath(folder) == folder, FileStat.lstat(folder)?.isSymlink == false else {
-                result(.refused, folder, "the quarantine folder isn't where it should be (a symlink?)"); continue
-            }
             var deleted = 0, freed: Int64 = 0, problems: [String] = []
             for i in m.items.indices where m.items[i].state.isHeld {
                 let dir = "\(folder)/items/\(m.items[i].index)"

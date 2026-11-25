@@ -91,7 +91,7 @@ struct CleanupPlanTests {
         #expect(rest.map(\.path) == [s.cache] && rest[0].outcome == .applied)
         #expect(FileStat.lstat("\(s.cache)/blob")?.allocatedBytes ?? 0 >= 40_000)
         let again = try CleanupApplier.restore(planID: plan.id, quarantine: s.quarantine, now: s.home.now)
-        #expect(again.count == 1 && again[0].detail == "nothing left to restore")
+        #expect(again.count == 1 && again[0].detail == "nothing left to restore")  // restored, not deleted
     }
 
     @Test func applyRechecksEveryItem() throws {

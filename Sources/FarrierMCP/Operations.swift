@@ -497,6 +497,13 @@ public enum Operations {
             journal("notApplied", detail: refusal)
             return ApplyOutput(planID: plan.id, results: [], error: refusal)
         }
+        // Don't ask for an approval that can't lead anywhere (already deleted, restored since, …).
+        let problems = CleanupApplier.expiryProblems(plan, quarantine: ctx.quarantine)
+        if problems.count == plan.items.count {
+            let why = problems.sorted { $0.key < $1.key }.map { "\($0.key.prefix(8)): \($0.value)" }.joined(separator: "; ")
+            journal("notApplied", detail: why)
+            return ApplyOutput(planID: plan.id, results: [], error: "nothing to delete, so nothing was asked: \(why)")
+        }
         do {
             try ctx.approveInProcess(plan)
             journal("approved", detail: "on this Mac")
