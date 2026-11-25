@@ -103,6 +103,22 @@ public enum Runbooks {
             items are still restored. Don't claim any item will go through; you only know the state you saw when planning.
             """
         },
+        Runbook(name: "free-up-space", title: "Free up disk space",
+                description: "See where the space goes, and what Farrier can free and when",
+                arguments: [], tools: ["disk_usage", "cleanup_scan", "cleanup_plan", "quarantine_list", "quarantine_plan_expiry"]) { _ in
+            """
+            Help me free up disk space. Call disk_usage: say how full the disk is, what macOS can free by itself \
+            (purgeable), and the largest categories. If the quarantine holds anything, call quarantine_list and say what's in it and \
+            when its 7 days end. Call cleanup_scan and list what Farrier's rules would clean up, \
+            biggest first, with the days since last use, whether the app recreates it (regenerable), the rule's evidence, \
+            and the rules that were skipped and why. Be clear about timing: a cleanup moves items into Farrier's \
+            quarantine, which frees nothing yet; the space comes back when the quarantine is emptied, after 7 days or \
+            earlier with quarantine_plan_expiry (deleting for good, which asks me on the Mac). Point out large categories \
+            Farrier doesn't clean (apps, the Trash, simulators) and how I'd handle them myself. If I want a cleanup, make \
+            a plan with cleanup_plan for what I chose and show it; applying a cleanup doesn't ask me on the Mac, so only \
+            apply it when I've said so here.
+            """
+        },
         Runbook(name: "management-overview", title: "Who manages this Mac?",
                 description: "Explain MDM enrollment, configuration profiles and which settings they control",
                 arguments: [], tools: ["posture_check", "inventory"]) { _ in

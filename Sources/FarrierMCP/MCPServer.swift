@@ -199,6 +199,14 @@ public enum ToolCatalog {
              inputSchema: schema(["planID": planID], required: ["planID"]),
              annotations: .init(title: "Apply a plan", readOnlyHint: false, destructiveHint: true,
                                 idempotentHint: false, openWorldHint: false)),
+        Tool(name: "disk_usage", title: "Disk usage",
+             description: "Read-only: the disk's size and free space (and, on macOS, how much purgeable data macOS can "
+                 + "remove itself), the space taken by caches, logs, Xcode, simulators, package manager caches, the Trash, "
+                 + "apps and Farrier's quarantine, the number of APFS local snapshots, and what Farrier can free and when: "
+                 + "now (quarantine past its 7 days, via quarantine_plan_expiry), after expiry (the rest of the quarantine), "
+                 + "and after a cleanup (what cleanup_scan matches; moving it into the quarantine frees nothing yet). "
+                 + "Documents, Desktop, Downloads and other personal folders aren't measured.",
+             inputSchema: schema(), annotations: readOnly("Disk usage")),
         Tool(name: "cleanup_plan", title: "Plan a cleanup",
              description: "Make a plan that moves cleanup candidates (see cleanup_scan) into Farrier's quarantine: all of "
                  + "them, or only `paths`. Nothing moves until apply_plan, and only when the user asked for the cleanup. "
@@ -281,6 +289,8 @@ public enum ToolCatalog {
             case "cleanup_scan":
                 return try result(Operations.cleanupScan(ctx, ruleIDs: try stringSet(args["ruleIDs"]),
                                                          minAge: try optionalString(args, "minAge")))
+            case "disk_usage":
+                return try result(Operations.diskUsage(ctx))
             case "cleanup_plan":
                 return try result(Operations.planCleanup(ctx, ruleIDs: try stringSet(args["ruleIDs"]),
                                                          minAge: try optionalString(args, "minAge"),

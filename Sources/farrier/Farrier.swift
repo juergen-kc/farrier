@@ -13,7 +13,7 @@ struct Farrier: AsyncParsableCommand {
         abstract: "Keep your Mac sound: hygiene, posture, drift, patching and debugging.",
         discussion: "v0.1: rule packs, fact collection, posture evaluation, the privileged helper, and plan → approve → apply for the first fix (firewall). `farrier mcp` serves the same over MCP (stdio).",
         version: version,
-        subcommands: [Posture.self, InventoryCommand.self, CleanupCommand.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Undo.self, Restore.self, QuarantineCommand.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self, Uninstall.self]
+        subcommands: [Posture.self, InventoryCommand.self, DiskUsageCommand.self, CleanupCommand.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Undo.self, Restore.self, QuarantineCommand.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self, Uninstall.self]
     )
 }
 
@@ -245,6 +245,59 @@ struct InventoryCommand: ParsableCommand {
                 print(" \(mark) \(Inventory.describe(item, section: section.id))")
             }
         }
+    }
+}
+
+// MARK: - farrier disk-usage
+
+struct DiskUsageCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "disk-usage",
+        abstract: "How the disk is used, and what Farrier can free and when. Read-only.",
+        discussion: """
+        Measures caches, logs, Xcode, simulators, package manager caches, the Trash, apps and Farrier's quarantine \
+        (personal folders such as Documents aren't read). "Reclaimable" says when space comes back: moving items into \
+        the quarantine frees nothing until it's emptied.
+        """
+    )
+
+    @Flag(help: "Output JSON.")
+    var json = false
+
+    @OptionGroup var redaction: RedactOption
+
+    func run() throws {
+        redaction.apply()
+        let r: DiskUsageReport
+        do { r = try Operations.diskUsage(FarrierContext.live(actor: "cli")) } catch let error as OperationError {
+            note("\(error)")
+            throw ExitCode(2)
+        }
+        if json {
+            try Output.json(r)
+            return
+        }
+        func size(_ b: Int64) -> String { ByteCount.format(b).padding(toLength: 9, withPad: " ", startingAt: 0) }
+        if let v = r.volume {
+            var line = "disk: \(ByteCount.format(v.totalBytes)), \(ByteCount.format(v.availableBytes)) free"
+            if let p = v.purgeableBytes, p > 0 {
+                line += " (\(ByteCount.format(v.availableBytes + p)) with \(ByteCount.format(p)) purgeable that macOS frees itself)"
+            }
+            print(line)
+        }
+        if let n = r.localSnapshots { print("local snapshots: \(n)\(n > 0 ? " (macOS removes them when space runs low)" : "")") }
+        print("")
+        for c in r.categories.sorted(by: { $0.bytes > $1.bytes }) {
+            let bound = c.incomplete == true ? "≥" : " "
+            print("\(bound)\(size(c.bytes)) \(c.title)\(c.note.map { "  (\($0))" } ?? "")")
+        }
+        let x = r.reclaimable
+        print("\nwhat Farrier can free:")
+        print("  \(size(x.nowBytes)) now: quarantine past its 7 days (`farrier plan expire`)")
+        print("  \(size(x.afterExpiryBytes)) when the rest of the quarantine expires")
+        print("  \(size(x.cleanupCandidatesBytes)) after a cleanup of \(x.cleanupCandidates) item(s) (`farrier plan cleanup`), once it expires")
+        print("")
+        for n in r.notes { print("note: \(n)") }
     }
 }
 
