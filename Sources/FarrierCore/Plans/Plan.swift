@@ -42,6 +42,10 @@ public struct PlanItem: Codable, Sendable, Equatable {
             guard let reverted = try? UndoRules.validate(parameters) else { return action.summary }
             return "\(action.summary) (undoes plan \(reverted.prefix(8)))"
         }
+        if action.id == RemediationCatalog.cleanupQuarantine.id {
+            guard let p = try? CleanupItemRules.validate(parameters) else { return action.summary }
+            return "\(action.summary): \(p.path)"
+        }
         guard action.takesParameters, let p = try? ExceptionRules.validate(ruleID: ruleID, parameters,
                                                                             requireReason: action.id == RemediationCatalog.exceptionAdd.id) else {
             return action.summary
@@ -103,7 +107,8 @@ public struct Plan: Codable, Sendable, Equatable {
         // that can edit a saved plan must not be able to describe one change and have another approved.
         for item in plan.items {
             guard let action = RemediationCatalog.action(item.action) else {
-                throw PlanError("unknown action `\(item.action)`")
+                throw PlanError("unknown action `\(item.action)`: the plan was probably made by a newer Farrier "
+                                + "(this is \(FarrierVersion.string)); apply it with the farrier that made it")
             }
             guard item.tier == action.tier else {
                 throw PlanError("`\(item.action)` is \(action.tier.rawValue), but the plan says \(item.tier.rawValue)")
@@ -113,6 +118,8 @@ public struct Plan: Codable, Sendable, Equatable {
             }
             if action.reverses != nil {
                 _ = try UndoRules.validate(item.parameters)
+            } else if action.id == RemediationCatalog.cleanupQuarantine.id {
+                _ = try CleanupItemRules.validate(item.parameters)
             } else if action.takesParameters {
                 _ = try ExceptionRules.validate(ruleID: item.ruleID, item.parameters,
                                                 requireReason: action.id == RemediationCatalog.exceptionAdd.id)
@@ -156,7 +163,7 @@ public struct RemediationAction: Sendable, Equatable {
     public var reverses: String? = nil
     /// Exceptions carry their scope as parameters, undo actions the plan they reverse; everything else is fully
     /// described by the action.
-    public var takesParameters: Bool { id.hasPrefix("exception.") || reverses != nil }
+    public var takesParameters: Bool { id.hasPrefix("exception.") || id.hasPrefix("cleanup.") || reverses != nil }
 }
 
 public enum RemediationCatalog {
@@ -219,8 +226,15 @@ public enum RemediationCatalog {
         return a
     }
 
+    /// Moves one cleanup candidate into the user's quarantine (restorable for 7 days). Applied in-process, not by the
+    /// helper: it only moves the user's own files, and re-checks each against its cleanup rule first.
+    public static let cleanupQuarantine = RemediationAction(
+        id: "cleanup.quarantine", tier: .t2, fact: "cleanup.candidates", compliantValues: [], managedPayloadTypes: [],
+        managedDeclarationTypes: [], managedPreference: nil, summary: "Move to Farrier's quarantine"
+    )
+
     public static let all: [RemediationAction] = [firewallEnable, firewallStealthEnable, gatekeeperEnable, securityAutoInstall,
-                                                  exceptionAdd, exceptionRemove,
+                                                  exceptionAdd, exceptionRemove, cleanupQuarantine,
                                                   firewallRestore, firewallStealthRestore, securityAutoInstallRestore]
 
     /// The undo action for `actionID`, if Farrier can undo it.
@@ -235,6 +249,8 @@ public enum RemediationCatalog {
             return "withdraw the exception with `farrier exceptions remove`"
         case exceptionRemove.id:
             return "accept it again with `farrier exceptions add`"
+        case cleanupQuarantine.id:
+            return "put it back from the quarantine with `farrier restore`"
         default:
             return "Farrier can't undo `\(actionID)`"
         }

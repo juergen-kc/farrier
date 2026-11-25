@@ -49,6 +49,15 @@ public struct FileEntry: Sendable, Equatable {
     public let allocatedBytes: Int64
     public let modified: Int64
     public let accessed: Int64
+    public var device: UInt64 = 0
+    public var inode: UInt64 = 0
+    /// The status change time (creation, rename, permission change), in nanoseconds.
+    public var changed: Int64 = 0
+
+    /// What a plan records to recognise the item when it's applied: one swapped in since planning (another inode,
+    /// or the same inode reused for a new entry, which gets a new change time, or a link where a folder was)
+    /// doesn't match.
+    public var fingerprint: String { "\(device):\(inode):\(changed):\(isSymlink ? "l" : isDirectory ? "d" : "f")" }
 }
 
 public enum FileStat {
@@ -58,12 +67,18 @@ public enum FileStat {
         guard systemLstat(path, &st) == 0 else { return nil }
         #if os(Linux)
         let m = Int64(st.st_mtim.tv_sec), a = Int64(st.st_atim.tv_sec)
+        let c = Int64(st.st_ctim.tv_sec) &* 1_000_000_000 &+ Int64(st.st_ctim.tv_nsec)
         #else
         let m = Int64(st.st_mtimespec.tv_sec), a = Int64(st.st_atimespec.tv_sec)
+        let c = Int64(st.st_ctimespec.tv_sec) &* 1_000_000_000 &+ Int64(st.st_ctimespec.tv_nsec)
         #endif
         let type = st.st_mode & S_IFMT
-        return FileEntry(isDirectory: type == S_IFDIR, isSymlink: type == S_IFLNK,
-                         allocatedBytes: Int64(st.st_blocks) * 512, modified: m, accessed: a)
+        var e = FileEntry(isDirectory: type == S_IFDIR, isSymlink: type == S_IFLNK,
+                          allocatedBytes: Int64(st.st_blocks) * 512, modified: m, accessed: a)
+        e.device = UInt64(truncatingIfNeeded: st.st_dev)
+        e.inode = UInt64(truncatingIfNeeded: st.st_ino)
+        e.changed = c
+        return e
     }
 
     private static func systemLstat(_ path: String, _ st: inout stat) -> Int32 {

@@ -10,6 +10,8 @@ public enum ProtectedPaths {
         "~/Library/Containers/com.apple.mail", "~/Library/Group Containers/group.com.apple.notes",
         "/System", "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/libexec", "/usr/share",
         "/Library/Keychains", "/private/var/db",
+        // Farrier's own state: the quarantine, the journal, the approval key's public half.
+        "~/Library/Application Support/Farrier", "/Library/Application Support/Farrier",
     ]
 
     /// The longest literal leading part of a glob, up to the first component with a wildcard.

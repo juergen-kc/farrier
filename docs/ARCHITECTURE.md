@@ -347,7 +347,15 @@ Root-owned items go to the helper together with the proof.
   quarantine is `/Library/Application Support/Farrier/Quarantine/<plan-id>/` (mode 0700, owned by root).
 - Items are **renamed** (moved) on the same volume, so quarantining is instant and uses no
   extra space. Items on another volume are skipped and reported, never copied and deleted.
-- `manifest.json` maps each original path to its quarantined path and metadata.
+- `manifest.json` maps each original path to its quarantined path (`items/<n>/<name>`), size, rule and state.
+  An item is recorded as `moving` before it's renamed and `quarantined` after, so a crash in between can't lose
+  track of it; restoring marks it `restored`.
+- Applying a cleanup plan re-runs the item's rule (only bundled packs count) and requires the path to still be one of
+  its candidates (old enough, no app the rule waits for running, no protected path), to have the fingerprint recorded
+  when planning (device, inode, change time and type), to sit below no symlink, and to be on the quarantine's volume.
+  Anything else is refused and left in place. `~/Library/Application Support/Farrier` is a protected path itself.
+- `farrier restore <plan>` (MCP `quarantine_restore`) moves items back; one whose original path is taken again
+  stays in the quarantine. `farrier undo` on a cleanup plan points to `restore`.
 - The default retention is 7 days. Expiring quarantine is itself a T3 operation. The scheduled
   expiry runs as a T3 plan that the user pre-approved when changing the setting.
 - Disk space is not actually freed until the retention window expires. Reports show **reclaimable
