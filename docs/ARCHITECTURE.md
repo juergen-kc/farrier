@@ -361,7 +361,15 @@ Root-owned items go to the helper together with the proof.
   (the items are the user's), after the same approval as a T4 plan: the same key checks (access list intact, enrolled
   with the helper, not past its rotation date) and a Touch ID or password prompt naming the plan. Each item must
   still hold the number of items and bytes it was planned with; deletion never follows symlinks and makes read-only
-  folders writable first. Deleted items stay in the manifest as `deleted`. The scheduled
+  folders writable first. Deleted items stay in the manifest as `deleted`.
+- **Automatic expiry** (`farrier quarantine auto-expire on`) is the pre-approved T3: the user approves once on the Mac,
+  which signs a small policy ("delete quarantined items once their 7 days are over", the retention, this Mac) with
+  the approval key, saved in `~/Library/Application Support/Farrier/auto-expiry.json`. A daily LaunchAgent
+  (`dev.farrier.quarantine-expiry`) runs `farrier quarantine expire-due`, which acts only if the policy's public key
+  is the one the helper has enrolled (the root-owned record), its signature verifies, and the Mac and retention
+  match; then it deletes only plans past their 7 days and journals as `schedule`. Neither a rewritten file nor an
+  MCP client can turn it on, and after the key's monthly rotation the run stops until the user approves again.
+  Turning it off needs no approval; `farrier uninstall` removes the agent. The scheduled
   expiry runs as a T3 plan that the user pre-approved when changing the setting.
 - Disk space is not actually freed until the retention window expires. Reports show **reclaimable
   now** and **reclaimable after expiry** separately, so nobody is misled.

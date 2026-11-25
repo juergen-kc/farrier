@@ -219,6 +219,27 @@ public enum PlanApplier {
         }
     }
 
+    /// Signs a standing approval (automatic expiry) with the approval key: the same key checks as a plan, a key past
+    /// its rotation date is refused, and the user approves with Touch ID or their password. Returns the signature and
+    /// the public key it verifies with.
+    public static func signPolicy(_ payload: Data, reason: String, now: Date = Date()) throws -> (signature: Data, publicKey: Data) {
+        let enrolledAt = try checkApprovalKey()
+        if let enrolledAt, case .expired(let days) = ApprovalKeyPolicy.age(enrolledAt: enrolledAt, now: Int64(now.timeIntervalSince1970)) {
+            throw PlanApplyError.notReady(ApprovalKeyPolicy.expiredMessage(days: days))
+        }
+        let signature: Data
+        do {
+            signature = try ApprovalKey.sign(payload, reason: reason)
+        } catch let error as LAError where [.userCancel, .appCancel, .systemCancel].contains(error.code) {
+            throw PlanApplyError.notReady("the approval prompt was cancelled; nothing changed")
+        }
+        let publicKey = try ApprovalKey.publicKey()
+        guard FarrierCrypto.isValidSignature(signature, for: payload, publicKeyDER: publicKey) else {
+            throw PlanApplyError.refused("the approval signature didn't verify")
+        }
+        return (signature, publicKey)
+    }
+
     /// Checks the key, gets a nonce, asks the user (Touch ID or password), and hands the plan to the helper.
     public static func apply(_ plan: Plan, now: Date = Date()) throws -> ApplyReply {
         guard Int64(now.timeIntervalSince1970) < plan.expiresAt else { throw PlanApplyError.expired }
