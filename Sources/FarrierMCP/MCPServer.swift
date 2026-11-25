@@ -226,6 +226,14 @@ public enum ToolCatalog {
                                  required: ["planID"]),
              annotations: .init(title: "Restore from the quarantine", readOnlyHint: false, destructiveHint: false,
                                 idempotentHint: false, openWorldHint: false)),
+        Tool(name: "quarantine_plan_expiry", title: "Plan emptying the quarantine",
+             description: "Make a plan that deletes quarantined items for good, so their space is freed: every cleanup "
+                 + "plan past its 7 days, or only `planIDs` (also before then). It can't be undone: only when the user asks. "
+                 + "Nothing is deleted until apply_plan, which asks the user for Touch ID or their password on the Mac.",
+             inputSchema: schema(["planIDs": ["type": "array", "items": ["type": "string"],
+                                              "description": "Cleanup plan ids or prefixes, as quarantine_list shows them (default: all past their 7 days)"]]),
+             annotations: .init(title: "Plan emptying the quarantine", readOnlyHint: false, destructiveHint: false,
+                                idempotentHint: false, openWorldHint: false)),
         Tool(name: "exceptions_list", title: "List posture exceptions",
              description: "The approved posture exceptions: vendors (Apple Team IDs) whose signed items the user accepted for "
                  + "a rule, with the reason and when.",
@@ -277,6 +285,8 @@ public enum ToolCatalog {
                 return try result(Operations.planCleanup(ctx, ruleIDs: try stringSet(args["ruleIDs"]),
                                                          minAge: try optionalString(args, "minAge"),
                                                          paths: try stringSet(args["paths"], "paths")))
+            case "quarantine_plan_expiry":
+                return try result(Operations.planExpiry(ctx, ids: try stringSet(args["planIDs"], "planIDs").map { $0.sorted() }))
             case "quarantine_list":
                 return try result(Operations.quarantineList(ctx, details: try optionalBool(args, "details") ?? false))
             case "quarantine_restore":

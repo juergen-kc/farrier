@@ -55,6 +55,15 @@ public struct FarrierContext {
     public var cleanupScanner: () -> CleanupScanner = { CleanupScanner() }
     /// Where cleanup plans move items to.
     public var quarantine: Quarantine = .default
+    /// Asks the user on the Mac (Touch ID or password) to approve a plan this process applies itself (T3 expiry of
+    /// the quarantine). Throws unless they approved. Not available on Linux.
+    public var approveInProcess: (Plan) throws -> Void = { plan in
+        #if os(macOS)
+        try PlanApplier.approveInProcess(plan)
+        #else
+        throw OperationError("approving plans needs macOS and Farrier.app")
+        #endif
+    }
 
     public init(collectFacts: @escaping () -> CollectionResult, rulePaths: [String], plans: PlanStore, journal: Journal,
                 host: @escaping () -> String, applyThroughHelper: @escaping (Plan) throws -> ApplyReply, actor: String) {
@@ -373,6 +382,9 @@ public enum Operations {
     public static func apply(_ ctx: FarrierContext, id: String, now: Date = Date()) throws -> ApplyOutput {
         let plan = try ctx.plans.load(id)
         if plan.tier == .t2 { return applyCleanup(ctx, plan, now: now) }
+        if plan.items.allSatisfy({ $0.action == RemediationCatalog.quarantineExpire.id }) {
+            return applyExpiry(ctx, plan, now: now)
+        }
         let hash = try plan.hash().hexString
         func record(_ outcome: String, _ r: ItemResult? = nil, detail: String? = nil) {
             try? ctx.journal.append(JournalRecord(time: Int64(Date().timeIntervalSince1970), actor: ctx.actor, planID: plan.id,
@@ -447,12 +459,79 @@ public enum Operations {
         }
     }
 
+    /// Plans deleting quarantined items for good (T3): every cleanup plan past its 7 days, or the given ones
+    /// (ids or prefixes) also before. Nothing is deleted until the plan is applied and the user approves on the Mac.
+    public static func planExpiry(_ ctx: FarrierContext, ids: [String]? = nil, now: Date = Date()) throws -> PlanOutput {
+        var planIDs: [String]?
+        if let ids, !ids.isEmpty {
+            do { planIDs = try ids.map { try ctx.quarantine.resolve($0) } } catch let e as PlanError { throw OperationError(e.description) }
+        }
+        let (plan, skipped) = Planner.planExpiry(quarantine: ctx.quarantine, planIDs: planIDs, host: ctx.host(), now: now)
+        guard let plan else {
+            let none = planIDs == nil ? "nothing in the quarantine is past its 7 days" : "nothing to delete"
+            return PlanOutput(plan: nil, planHash: nil, skipped: skipped, path: nil, next: none)
+        }
+        let url = try ctx.plans.save(plan)
+        let hash = try plan.hash().hexString
+        let bytes = plan.items.reduce(0) { $0 + Int64($1.observed.object?["bytes"]?.number ?? 0) }
+        try? ctx.journal.append(JournalRecord(time: plan.createdAt, actor: ctx.actor, planID: plan.id, planHash: hash,
+                                              outcome: "planned", detail: "expiry: \(plan.items.count) quarantined plan(s), \(ByteCount.format(bytes))"))
+        return PlanOutput(plan: plan, planHash: hash, skipped: skipped, path: url.path,
+                          next: "review it with the user: this deletes the items for good. Applying it asks them for Touch ID "
+                              + "or their password on this Mac")
+    }
+
+    /// Applies an expiry (T3) plan in this process, after the user approved it on the Mac.
+    static func applyExpiry(_ ctx: FarrierContext, _ plan: Plan, now: Date) -> ApplyOutput {
+        let hash = (try? plan.hash().hexString) ?? ""
+        func journal(_ outcome: String, ruleID: String? = nil, detail: String?) {
+            try? ctx.journal.append(JournalRecord(time: Int64(Date().timeIntervalSince1970), actor: ctx.actor, planID: plan.id,
+                                                  planHash: hash, ruleID: ruleID,
+                                                  action: ruleID == nil ? nil : RemediationCatalog.quarantineExpire.id,
+                                                  outcome: outcome, detail: detail))
+        }
+        let t = Int64(now.timeIntervalSince1970)
+        let refusal: String? = plan.host != ctx.host() ? "the plan was made on another Mac"
+            : t >= plan.expiresAt ? "the plan expired; make a new one" : nil
+        if let refusal {
+            journal("notApplied", detail: refusal)
+            return ApplyOutput(planID: plan.id, results: [], error: refusal)
+        }
+        // Don't ask for an approval that can't lead anywhere (already deleted, restored since, …).
+        let problems = CleanupApplier.expiryProblems(plan, quarantine: ctx.quarantine)
+        if problems.count == plan.items.count {
+            let why = problems.sorted { $0.key < $1.key }.map { "\($0.key.prefix(8)): \($0.value)" }.joined(separator: "; ")
+            journal("notApplied", detail: why)
+            return ApplyOutput(planID: plan.id, results: [], error: "nothing to delete, so nothing was asked: \(why)")
+        }
+        do {
+            try ctx.approveInProcess(plan)
+            journal("approved", detail: "on this Mac")
+        } catch {
+            journal("notApplied", detail: "\(error)")
+            return ApplyOutput(planID: plan.id, results: [], error: "\(error)")
+        }
+        do {
+            let results = try CleanupApplier.expire(plan, quarantine: ctx.quarantine, now: Date())
+            let items = results.map { r in
+                ItemResult(ruleID: r.ruleID, action: RemediationCatalog.quarantineExpire.id,
+                           outcome: r.outcome == .applied ? .applied : r.outcome == .refused ? .refused : .failed,
+                           detail: "\(r.path): \(r.detail)")
+            }
+            for r in items { journal(r.outcome.rawValue, ruleID: r.ruleID, detail: r.detail) }
+            return ApplyOutput(planID: plan.id, results: items, error: nil)
+        } catch {
+            journal("notApplied", detail: "\(error)")
+            return ApplyOutput(planID: plan.id, results: [], error: "\(error)")
+        }
+    }
+
     public static func quarantineList(_ ctx: FarrierContext, details: Bool = false, now: Date = Date()) -> QuarantineOutput {
         let t = Int64(now.timeIntervalSince1970)
         // Fully restored plans hold nothing; their manifests stay, as a record, but aren't listed.
-        let plans = ctx.quarantine.list().filter { $0.items.contains { $0.state != .restored } }.map { m in
+        let plans = ctx.quarantine.list().filter { !$0.held.isEmpty }.map { m in
             QuarantineSummary(planID: m.planID, createdAt: m.createdAt, expiresAt: m.expiresAt, expired: t >= m.expiresAt,
-                              quarantined: m.items.filter { $0.state != .restored }.count,
+                              quarantined: m.held.count,
                               restored: m.items.filter { $0.state == .restored }.count,
                               bytes: m.quarantinedBytes, path: ctx.quarantine.folder(m.planID), items: details ? m.items : nil)
         }

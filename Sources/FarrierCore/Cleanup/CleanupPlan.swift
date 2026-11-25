@@ -87,6 +87,11 @@ public struct QuarantineItem: Codable, Sendable, Equatable {
         case moving
         case quarantined
         case restored
+        /// Deleted for good by an expiry plan.
+        case deleted
+
+        /// Still in the quarantine (or possibly: an interrupted move).
+        public var isHeld: Bool { self == .moving || self == .quarantined }
     }
     public let index: Int
     public let ruleID: String
@@ -96,6 +101,7 @@ public struct QuarantineItem: Codable, Sendable, Equatable {
     public let bytes: Int64
     public var state: State
     public var restoredAt: Int64?
+    public var deletedAt: Int64?
 }
 
 /// `manifest.json` in a plan's quarantine folder.
@@ -108,7 +114,9 @@ public struct QuarantineManifest: Codable, Sendable, Equatable {
     public let expiresAt: Int64
     public var items: [QuarantineItem]
 
-    public var quarantinedBytes: Int64 { items.filter { $0.state != .restored }.reduce(0) { $0 + $1.bytes } }
+    public var quarantinedBytes: Int64 { held.reduce(0) { $0 + $1.bytes } }
+    /// The items still in the quarantine.
+    public var held: [QuarantineItem] { items.filter { $0.state.isHeld } }
 }
 
 /// The user's quarantine: `~/Library/Application Support/Farrier/Quarantine/<plan-id>/` (docs/ARCHITECTURE.md).
@@ -213,7 +221,7 @@ public enum CleanupApplier {
             }
             let p: CleanupItemRules.Parameters
             do { p = try CleanupItemRules.validate(item.parameters) } catch { result(.refused, "?", "\(error)"); continue }
-            if manifest.items.contains(where: { $0.original == p.path && $0.state != .restored }) {
+            if manifest.items.contains(where: { $0.original == p.path && $0.state.isHeld }) {
                 result(.refused, p.path, "already in this plan's quarantine"); continue
             }
             guard owner[p.path] == item.ruleID else {
@@ -289,6 +297,10 @@ public enum CleanupApplier {
                 if paths != nil { result(.refused, "already restored") }   // asked for by name: say so
                 continue
             }
+            if item.state == .deleted {
+                if paths != nil { result(.refused, "it was deleted for good (the quarantine was emptied)") }
+                continue
+            }
             let stored = "\(folder)/\(item.stored)"
             if item.state == .moving, FileStat.lstat(stored) == nil, FileStat.lstat(item.original) != nil {
                 manifest.items[i].state = .restored   // interrupted before the move: it never left
@@ -316,8 +328,146 @@ public enum CleanupApplier {
         }
         try quarantine.save(manifest)
         if results.isEmpty {
-            results.append(CleanupItemResult(ruleID: "-", path: folder, outcome: .refused, detail: "nothing left to restore"))
+            let deleted = manifest.items.contains { $0.state == .deleted }
+            results.append(CleanupItemResult(ruleID: "-", path: folder, outcome: .refused,
+                                             detail: deleted ? "nothing left to restore: its items were deleted for good"
+                                                             : "nothing left to restore"))
         }
         return results
+    }
+}
+
+
+// MARK: - Expiry
+
+/// The one parameter of a `quarantine.expire` item: the cleanup plan whose quarantine it empties.
+public enum QuarantineExpiryRules {
+    public static func validate(_ parameters: [String: String]?) throws -> String {
+        guard let parameters, parameters.count == 1, let planID = parameters["plan"] else {
+            throw PlanError("an expiry item takes exactly one parameter, `plan`")
+        }
+        guard planID.count == 36, UUID(uuidString: planID) != nil, planID == planID.lowercased() else {
+            throw PlanError("`plan` must be a plan id")
+        }
+        return planID
+    }
+}
+
+extension Planner {
+    /// Plans deleting quarantined items for good: by default every cleanup plan past its 7 days; with `planIDs`,
+    /// those plans (also before their time: the approval on the Mac covers it). Each item records how many items
+    /// and bytes it deletes; applying refuses if that changed (something was restored since).
+    public static func planExpiry(quarantine: Quarantine, planIDs: [String]? = nil, host: String, now: Date = Date(),
+                                  ttl: Int64 = Plan.defaultTTL,
+                                  id: String = UUID().uuidString.lowercased()) -> (plan: Plan?, skipped: [PlanSkip]) {
+        let t = Int64(now.timeIntervalSince1970)
+        let action = RemediationCatalog.quarantineExpire
+        var items: [PlanItem] = []
+        var skipped: [PlanSkip] = []
+        let manifests: [QuarantineManifest]
+        if let planIDs {
+            manifests = planIDs.compactMap { pid in
+                do { return try quarantine.load(pid) } catch {
+                    skipped.append(PlanSkip(ruleID: "quarantine", reason: "\(pid.prefix(8)): no such quarantined plan"))
+                    return nil
+                }
+            }
+        } else {
+            manifests = quarantine.list()
+        }
+        for m in manifests {
+            let held = m.held
+            if held.isEmpty {
+                if planIDs != nil { skipped.append(PlanSkip(ruleID: "quarantine", reason: "\(m.planID.prefix(8)): holds nothing any more")) }
+                continue
+            }
+            if planIDs == nil && t < m.expiresAt { continue }   // not due yet
+            items.append(PlanItem(
+                ruleID: "quarantine", action: action.id, tier: action.tier, summary: action.summary, fact: action.fact,
+                observed: .object(["items": .int(held.count), "bytes": .int(Int(m.quarantinedBytes)),
+                                   "expiresAt": .int(Int(m.expiresAt)), "due": .bool(t >= m.expiresAt)]),
+                parameters: ["plan": m.planID]))
+        }
+        guard !items.isEmpty else { return (nil, skipped) }
+        let created = Int64(now.timeIntervalSince1970)
+        return (Plan(id: id, createdAt: created, expiresAt: created + ttl, host: host, items: items), skipped)
+    }
+}
+
+extension CleanupApplier {
+    /// Why each item of an expiry plan would be refused now, by cleanup plan id; empty when all can go ahead. Checked
+    /// before the approval prompt too, so nobody is asked to approve a plan that can't do anything.
+    public static func expiryProblems(_ plan: Plan, quarantine: Quarantine) -> [String: String] {
+        var problems: [String: String] = [:]
+        for item in plan.items {
+            guard let planID = try? QuarantineExpiryRules.validate(item.parameters) else { continue }
+            let folder = quarantine.folder(planID)
+            guard let m = try? quarantine.load(planID) else { problems[planID] = "no such quarantined plan any more"; continue }
+            let o = item.observed.object ?? [:]
+            if m.held.isEmpty {
+                problems[planID] = "nothing to delete any more (deleted or restored since)"
+            } else if m.held.count != Int(o["items"]?.number ?? -1) || Int(m.quarantinedBytes) != Int(o["bytes"]?.number ?? -1) {
+                problems[planID] = "it holds something else than when this was planned (restored since?); make a new plan"
+            } else if CleanupScanner.realPath(folder) != folder || FileStat.lstat(folder)?.isSymlink != false {
+                problems[planID] = "the quarantine folder isn't where it should be (a symlink?)"
+            }
+        }
+        return problems
+    }
+
+    /// Deletes what an expiry plan covers. The caller has had the plan approved on the Mac. Each quarantined plan
+    /// must still hold exactly what the expiry plan says (same number of items and bytes), and its folder must be
+    /// a real folder inside the quarantine (no symlink anywhere on the way).
+    public static func expire(_ plan: Plan, quarantine: Quarantine, now: Date = Date()) throws -> [CleanupItemResult] {
+        guard plan.items.allSatisfy({ $0.action == RemediationCatalog.quarantineExpire.id }) else {
+            throw PlanError("an expiry plan only holds expiry items")
+        }
+        var results: [CleanupItemResult] = []
+        for item in plan.items {
+            func result(_ o: CleanupItemResult.Outcome, _ path: String, _ d: String) {
+                results.append(CleanupItemResult(ruleID: item.ruleID, path: path, outcome: o, detail: d))
+            }
+            let planID: String
+            do { planID = try QuarantineExpiryRules.validate(item.parameters) } catch { result(.refused, "?", "\(error)"); continue }
+            let folder = quarantine.folder(planID)
+            let single = Plan(id: plan.id, createdAt: plan.createdAt, expiresAt: plan.expiresAt, host: plan.host, items: [item])
+            if let problem = expiryProblems(single, quarantine: quarantine)[planID] { result(.refused, folder, problem); continue }
+            guard var m = try? quarantine.load(planID) else { result(.refused, folder, "no such quarantined plan any more"); continue }
+            var deleted = 0, freed: Int64 = 0, problems: [String] = []
+            for i in m.items.indices where m.items[i].state.isHeld {
+                let dir = "\(folder)/items/\(m.items[i].index)"
+                if FileStat.lstat(dir) != nil, let problem = removeTree(dir) {
+                    problems.append("\(m.items[i].original): \(problem)")
+                    continue
+                }
+                m.items[i].state = .deleted
+                m.items[i].deletedAt = Int64(now.timeIntervalSince1970)
+                deleted += 1
+                freed += m.items[i].bytes
+            }
+            try? quarantine.save(m)
+            if problems.isEmpty {
+                result(.applied, folder, "deleted \(deleted) item(s) for good, \(ByteCount.format(freed)) freed")
+            } else {
+                result(.failed, folder, "deleted \(deleted) item(s); could not delete \(problems.count): \(problems.prefix(3).joined(separator: "; "))")
+            }
+        }
+        return results
+    }
+
+    /// Deletes a tree without following symlinks. Read-only folders (Go's module cache, some package caches) are
+    /// made writable first, or their entries couldn't be removed. Returns why it stopped, or nil when it's gone.
+    static func removeTree(_ path: String) -> String? {
+        guard let entry = FileStat.lstat(path) else { return nil }
+        if entry.isDirectory && !entry.isSymlink {
+            _ = chmod(path, 0o700)
+            for name in (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? [] {
+                if let problem = removeTree("\(path)/\(name)") { return problem }
+            }
+            guard rmdir(path) == 0 else { return "\(String(cString: strerror(errno))) (\(path))" }
+        } else {
+            guard unlink(path) == 0 else { return "\(String(cString: strerror(errno))) (\(path))" }
+        }
+        return nil
     }
 }

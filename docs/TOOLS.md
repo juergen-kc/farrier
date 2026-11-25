@@ -2,7 +2,7 @@
 
 > Status: design draft. Names and schemas may change before v0.1. **Implemented so far** (`farrier mcp`):
 > `farrier_status`, `facts_collect`, `posture_check`, `posture_explain`, `posture_plan_remediation`, `plan_show`,
-> `apply_plan`, `plan_undo`, `inventory`, `cleanup_scan`, `cleanup_plan`, `quarantine_list`, `quarantine_restore`, `journal_recent`, `exceptions_list`, `posture_plan_exception`, and the `security-checkup`
+> `apply_plan`, `plan_undo`, `inventory`, `cleanup_scan`, `cleanup_plan`, `quarantine_list`, `quarantine_restore`, `quarantine_plan_expiry`, `journal_recent`, `exceptions_list`, `posture_plan_exception`, and the `security-checkup`
 > prompt.
 > `farrier_status`, `facts_collect`, `journal_recent`, `cleanup_scan` and the two exception tools are additions to this catalog.
 
@@ -53,6 +53,7 @@ with on-device approval for T3 and T4.
 | `plan_show` | T0 | Show a plan. |
 | `apply_plan` | plan's tier | Apply a plan. T3/T4 trigger Touch ID on the Mac. Cleanup plans (T2) apply in the server's process without a prompt: every item is checked against its rule and fingerprint again, then moved into the quarantine; items used or changed since planning are refused and stay. Returns per-item results. |
 | `quarantine_list` | T0 | Implemented. Quarantined cleanup plans: items, space held (freed only at expiry), and expiry date; `details` lists each item. |
+| `quarantine_plan_expiry` | T0 | Implemented. Plan deleting quarantined items for good (T3): every cleanup plan past its 7 days, or only `planIDs` (also earlier). Each item records the number of items and bytes; applying refuses if that changed. `apply_plan` asks for Touch ID or the password on the Mac first, like T4. |
 | `quarantine_restore` | T2 | Implemented. Put a cleanup plan's items back, all or only `paths` (original paths). An item whose path is taken again stays in the quarantine. |
 
 ## Patching
