@@ -102,11 +102,13 @@ public enum DiskUsage {
         + "macOS asks before an app reads them"
 
     /// `localSnapshots`: the count, or nil where it can't be read. `entryLimit` bounds each category's count.
+    /// `root` is put in front of the absolute paths (`/Applications`): empty for this Mac, a folder in tests.
     public static func report(home: String, scan: CleanupReport, quarantine: [QuarantineManifest], volume: VolumeUsage?,
-                              localSnapshots: Int?, now: Date = Date(), entryLimit: Int = 1_000_000) -> DiskUsageReport {
+                              localSnapshots: Int?, now: Date = Date(), entryLimit: Int = 1_000_000,
+                              root: String = "") -> DiskUsageReport {
         let scanner = CleanupScanner(home: home, runningProcesses: { [] }, appInstalled: { _ in false }, entryLimit: entryLimit)
         var measured: [UsageCategory] = []
-        for c in resolvedCategories(home: scanner.home) {
+        for c in resolvedCategories(home: scanner.home, root: root) {
             var bytes: Int64 = 0, incomplete = false, found: [String] = []
             for path in c.paths {
                 guard let entry = FileStat.lstat(path) else { continue }
@@ -135,8 +137,8 @@ public enum DiskUsage {
                                localSnapshots: localSnapshots, notes: notes)
     }
 
-    static func resolvedCategories(home: String) -> [(id: String, title: String, paths: [String], note: String?)] {
-        categories.map { c in (c.id, c.title, c.paths.map { $0.hasPrefix("~/") ? home + $0.dropFirst(1) : $0 }, c.note) }
+    static func resolvedCategories(home: String, root: String) -> [(id: String, title: String, paths: [String], note: String?)] {
+        categories.map { c in (c.id, c.title, c.paths.map { $0.hasPrefix("~/") ? home + $0.dropFirst(1) : root + $0 }, c.note) }
     }
 
     /// `tmutil listlocalsnapshots /`: one `com.apple.TimeMachine.<date>.local` line per snapshot.

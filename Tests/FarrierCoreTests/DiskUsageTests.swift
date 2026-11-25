@@ -19,19 +19,21 @@ struct DiskUsageTests {
         home.file(".npm/_cacache/c", bytes: 20_000, daysAgo: 1)
         home.file(".cargo/registry/cache/d", bytes: 10_000, daysAgo: 1)
         home.file("Documents/secret.pdf", bytes: 90_000, daysAgo: 1)   // never read
+        home.file("sys/Applications/Tool.app/Contents/bin", bytes: 15_000, daysAgo: 1)   // /Applications, under the test root
         let scan = CleanupReport(rules: [], bytes: 7_000, candidates: 2)
         let now = Date(timeIntervalSince1970: 1_000_000)
         let quarantine = [manifest(4_000, expiresAt: 999_000), manifest(6_000, expiresAt: 1_100_000),
                           manifest(9_999, expiresAt: 0, state: .deleted), manifest(9_999, expiresAt: 0, state: .restored)]
         let r = DiskUsage.report(home: home.root, scan: scan, quarantine: quarantine,
                                  volume: VolumeUsage(totalBytes: 1_000, availableBytes: 100, availableWithPurgeableBytes: 250),
-                                 localSnapshots: 3, now: now)
+                                 localSnapshots: 3, now: now, root: "\(home.root)/sys")
         let byID = Dictionary(uniqueKeysWithValues: r.categories.map { ($0.id, $0) })
         #expect((byID["caches"]?.bytes ?? 0) >= 30_000)
         #expect((byID["logs"]?.bytes ?? 0) >= 5_000)
         let pm = try #require(byID["packageManagers"])
         #expect(pm.bytes >= 30_000 && pm.paths.count == 2)          // only the folders that exist
         #expect(byID["xcode"] == nil)                                // missing: not listed
+        #expect(byID["apps"]?.paths == ["\(home.root)/sys/Applications"] && (byID["apps"]?.bytes ?? 0) >= 15_000)
         #expect(!r.categories.contains { $0.paths.contains { $0.contains("Documents") } })
         #expect(r.notes.contains(DiskUsage.personalFoldersNote))
         #expect(r.reclaimable == Reclaimable(nowBytes: 4_000, afterExpiryBytes: 6_000, cleanupCandidatesBytes: 7_000, cleanupCandidates: 2))
@@ -46,7 +48,7 @@ struct DiskUsageTests {
         chmod("\(home.root)/.Trash/old", 0)
         defer { chmod("\(home.root)/.Trash/old", 0o755) }
         let r = DiskUsage.report(home: home.root, scan: CleanupReport(rules: [], bytes: 0, candidates: 0), quarantine: [],
-                                 volume: nil, localSnapshots: nil)
+                                 volume: nil, localSnapshots: nil, root: "\(home.root)/sys")
         let trash = try #require(r.categories.first { $0.id == "trash" })
         #expect(trash.incomplete == true && trash.note?.contains("Full Disk Access") == true)
     }
@@ -84,6 +86,7 @@ struct DiskUsageTests {
         ctx.quarantine = Quarantine(root: "\(home.root)/q")
         ctx.volumeUsage = { _ in VolumeUsage(totalBytes: 100, availableBytes: 10, availableWithPurgeableBytes: nil) }
         ctx.localSnapshots = { 0 }
+        ctx.systemRoot = "\(home.root)/sys"
         let r = try ToolCatalog.call("disk_usage", arguments: [:], context: ctx)
         #expect(r.isError != true)
         let o = try #require(r.structuredContent?.objectValue)
