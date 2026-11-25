@@ -87,7 +87,7 @@ public struct SnapshotStore: Sendable {
         return s
     }
 
-    /// By id or unique prefix (at least 4 characters), or `latest`.
+    /// By id or unique prefix (at least 4 characters), `latest`, or label (the newest snapshot with that label).
     public func load(_ idOrPrefix: String) throws -> Snapshot {
         let all = list()
         if idOrPrefix == "latest" {
@@ -95,8 +95,9 @@ public struct SnapshotStore: Sendable {
             return s
         }
         let wanted = idOrPrefix.lowercased()
-        guard wanted.count >= 4 else { throw PlanError("give at least 4 characters of the snapshot id") }
-        let matches = all.filter { $0.id.hasPrefix(wanted) }
+        let matches = wanted.count >= 4 ? all.filter { $0.id.hasPrefix(wanted) } : []
+        if matches.isEmpty, let labelled = all.first(where: { $0.label == idOrPrefix }) { return labelled }
+        guard wanted.count >= 4 else { throw PlanError("no snapshot labelled \(idOrPrefix); give at least 4 characters of an id") }
         guard let s = matches.first else { throw PlanError("no snapshot \(idOrPrefix) (see `farrier snapshot list`)") }
         guard matches.count == 1 else { throw PlanError("\(idOrPrefix) matches \(matches.count) snapshots; give more of the id") }
         return s

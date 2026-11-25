@@ -68,6 +68,8 @@ struct SnapshotTests {
         #expect(kept.map(\.label) == ["s4", "s3", "s2"])
         #expect(try store.load("latest").label == "s4")
         #expect(try store.load(String(ids[3].prefix(8))).label == "s3")
+        #expect(try store.load("s2").id == ids[2])                    // by label
+        #expect(throws: PlanError.self) { try store.load("nope") }
         #expect(throws: PlanError.self) { try store.load(ids[0]) }   // pruned
         let attrs = try FileManager.default.attributesOfItem(atPath: "\(store.directory)/\(ids[4]).json")
         #expect((attrs[.posixPermissions] as? NSNumber)?.intValue == 0o600)

@@ -309,10 +309,10 @@ struct SnapshotCommand: ParsableCommand {
             discussion: "A section that couldn't be read in one of the two is shown as not compared, never as removed."
         )
 
-        @Argument(help: "From this snapshot (id, prefix or `latest`).")
+        @Argument(help: "From this snapshot (id, prefix, label or `latest`).")
         var from: String = "latest"
 
-        @Argument(help: "To this snapshot (default: now).")
+        @Argument(help: "To this snapshot (id, prefix or label; default: now).")
         var to: String?
 
         @Flag(help: "Output JSON.")
