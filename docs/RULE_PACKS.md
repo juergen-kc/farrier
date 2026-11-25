@@ -52,7 +52,7 @@ rules:
 | `regenerable` | yes | `true` only if the owning app recreates the data without user action |
 | `minAge`, `minSize` | no | `minAge` counts from the newest modification of anything inside, or the newest access of a file inside (folder access times aren't used: listing a folder changes them). A run can raise it (`--min-age`), never lower it. |
 | `when` | no | Preconditions: `processNotRunning`, `appInstalled`, `appNotInstalled` (orphan detection) |
-| `privileged` | no | `true` means the helper applies it (bundled packs only) |
+| `privileged` | no | `true` means the privileged helper scans and moves it (bundled packs only, T2, targets only inside `/Library/Caches` or `/Library/Logs`). Targets outside home folders must be privileged. |
 | `evidence` | yes | Plain-language reason it's safe. It is shown in every plan. |
 
 Globs: `*` and `?` match within one component and never match a leading dot; `**` matches any number of folders

@@ -191,7 +191,8 @@ downloads, npm, Cargo and Gradle caches, next to the Xcode pack; cleanup plans a
 (`farrier plan cleanup`, `apply`, `restore`, `quarantine list`; MCP `cleanup_plan`, `quarantine_list`,
 `quarantine_restore`). Quarantine expiry (T3, `farrier plan expire`, MCP `quarantine_plan_expiry`). `disk_usage` (`farrier disk-usage`) and the
 `free-up-space` runbook. Automatic expiry (`farrier quarantine auto-expire on`,
-a standing T3 approval and a daily LaunchAgent). Next: privileged (root) cleanup.
+a standing T3 approval and a daily LaunchAgent). System locations through the helper (`farrier plan
+cleanup --system`, a root-only quarantine, restore and expiry with approval).
 
 - Quarantine (user and root), restore, and expiry
 - Cleanup packs: system and user caches, logs, Xcode, simulators, package managers

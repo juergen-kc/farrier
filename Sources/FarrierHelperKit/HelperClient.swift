@@ -159,6 +159,24 @@ public enum HelperClient {
         return result
     }
 
+    /// What the privileged cleanup rules match in system locations, scanned by the helper as root.
+    public static func scanSystemCleanup() throws -> CleanupReport {
+        try ensureCurrent()
+        let data = try call(timeout: 300) { h, r in h.scanSystemCleanup(clientVersion: HelperConstants.handshakeVersion, reply: r) }
+        guard let reply = HelperWire.decode(SystemScanReply.self, data) else { throw HelperUnavailable.connection("unreadable reply") }
+        guard let report = reply.report else { throw HelperUnavailable.connection(reply.error ?? "no report") }
+        return report
+    }
+
+    /// The root-only quarantine's manifests.
+    public static func listSystemQuarantine() throws -> [QuarantineManifest] {
+        try ensureCurrent()
+        let data = try call(timeout: 30) { h, r in h.listSystemQuarantine(clientVersion: HelperConstants.handshakeVersion, reply: r) }
+        guard let reply = HelperWire.decode(SystemQuarantineReply.self, data) else { throw HelperUnavailable.connection("unreadable reply") }
+        guard let manifests = reply.manifests else { throw HelperUnavailable.connection(reply.error ?? "no answer") }
+        return manifests
+    }
+
     public static func hello(timeout: TimeInterval? = nil) throws -> HelperInfo {
         let data = try call(timeout: timeout) { h, r in h.hello(clientVersion: HelperConstants.handshakeVersion, reply: r) }
         guard let info = HelperWire.decode(HelperInfo.self, data) else { throw HelperUnavailable.connection("bad reply") }

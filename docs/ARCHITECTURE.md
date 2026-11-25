@@ -369,7 +369,17 @@ Root-owned items go to the helper together with the proof.
   is the one the helper has enrolled (the root-owned record), its signature verifies, and the Mac and retention
   match; then it deletes only plans past their 7 days and journals as `schedule`. Neither a rewritten file nor an
   MCP client can turn it on, and after the key's monthly rotation the run stops until the user approves again.
-  Turning it off needs no approval; `farrier uninstall` removes the agent. The scheduled
+  Turning it off needs no approval; `farrier uninstall` removes the agent.
+- **System locations** (`/Library/Caches`, `/Library/Logs`) are cleaned by the helper. Their rules are marked
+  `privileged`, and the linter allows privileged targets only inside those two folders (system paths in ordinary
+  rules are refused). The helper scans as root with the packs in its own app bundle, never the client's
+  (`scanSystemCleanup`), and lists the root quarantine (`listSystemQuarantine`). `farrier plan cleanup --system`
+  plans them as `cleanup.quarantineSystem` items: still T2 (reversible), but a plan the helper carries out needs
+  the user's approval on the Mac, so applying asks for Touch ID or the password. The helper re-checks each item
+  against its own rules and the fingerprint, then moves it into the root-only quarantine
+  (`/Library/Application Support/Farrier/Quarantine`, 0700). Restoring (`quarantine.restoreSystem`, everything at
+  once, refused if the quarantine changed) and expiry (`quarantine.expireSystem`, T3) are approved the same way.
+  Automatic expiry covers the user's quarantine only. The scheduled
   expiry runs as a T3 plan that the user pre-approved when changing the setting.
 - Disk space is not actually freed until the retention window expires. Reports show **reclaimable
   now** and **reclaimable after expiry** separately, so nobody is misled.

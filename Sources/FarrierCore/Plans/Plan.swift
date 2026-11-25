@@ -9,6 +9,14 @@ extension Tier: Comparable {
     public var needsApproval: Bool { self >= .t3 }
 }
 
+extension Plan {
+    /// T3/T4 plans, and any plan the privileged helper carries out (root moves files even for a reversible T2
+    /// cleanup), need the user's approval on the Mac.
+    public var needsApproval: Bool {
+        tier.needsApproval || items.contains { RemediationCatalog.action($0.action)?.privileged == true }
+    }
+}
+
 /// One change in a plan. It records what was observed when planning, so the reviewer sees why it's there and
 /// the helper can tell when the Mac has changed since.
 public struct PlanItem: Codable, Sendable, Equatable {
@@ -42,11 +50,11 @@ public struct PlanItem: Codable, Sendable, Equatable {
             guard let reverted = try? UndoRules.validate(parameters) else { return action.summary }
             return "\(action.summary) (undoes plan \(reverted.prefix(8)))"
         }
-        if action.id == RemediationCatalog.cleanupQuarantine.id {
+        if action.id.hasPrefix("cleanup.") {
             guard let p = try? CleanupItemRules.validate(parameters) else { return action.summary }
             return "\(action.summary): \(p.path)"
         }
-        if action.id == RemediationCatalog.quarantineExpire.id {
+        if action.id.hasPrefix("quarantine.") {
             guard let planID = try? QuarantineExpiryRules.validate(parameters) else { return action.summary }
             return "\(action.summary): what cleanup plan \(planID.prefix(8)) moved there"
         }
@@ -122,9 +130,9 @@ public struct Plan: Codable, Sendable, Equatable {
             }
             if action.reverses != nil {
                 _ = try UndoRules.validate(item.parameters)
-            } else if action.id == RemediationCatalog.cleanupQuarantine.id {
+            } else if action.id.hasPrefix("cleanup.") {
                 _ = try CleanupItemRules.validate(item.parameters)
-            } else if action.id == RemediationCatalog.quarantineExpire.id {
+            } else if action.id.hasPrefix("quarantine.") {
                 _ = try QuarantineExpiryRules.validate(item.parameters)
             } else if action.takesParameters {
                 _ = try ExceptionRules.validate(ruleID: item.ruleID, item.parameters,
@@ -167,6 +175,8 @@ public struct RemediationAction: Sendable, Equatable {
     /// For an undo action: the action it reverses. Undo actions only restore what the helper's journal says that
     /// action changed (the helper checks), so they can't be used to weaken a setting Farrier didn't change.
     public var reverses: String? = nil
+    /// Carried out by the privileged helper on root-owned files: the plan needs the user's approval even at T2.
+    public var privileged = false
     /// Exceptions carry their scope as parameters, undo actions the plan they reverse; everything else is fully
     /// described by the action.
     public var takesParameters: Bool { id.hasPrefix("exception.") || id.hasPrefix("cleanup.") || id.hasPrefix("quarantine.") || reverses != nil }
@@ -246,8 +256,27 @@ public enum RemediationCatalog {
         managedDeclarationTypes: [], managedPreference: nil, summary: "Delete for good"
     )
 
+    /// The same three for system locations (`/Library/Caches`, `/Library/Logs`): the helper moves, restores and
+    /// deletes them in the root-only quarantine, `/Library/Application Support/Farrier/Quarantine`.
+    public static let cleanupQuarantineSystem = privileged(RemediationAction(
+        id: "cleanup.quarantineSystem", tier: .t2, fact: "cleanup.candidates", compliantValues: [], managedPayloadTypes: [],
+        managedDeclarationTypes: [], managedPreference: nil, summary: "Move to Farrier's system quarantine"))
+    public static let quarantineRestoreSystem = privileged(RemediationAction(
+        id: "quarantine.restoreSystem", tier: .t2, fact: "quarantine.plans", compliantValues: [], managedPayloadTypes: [],
+        managedDeclarationTypes: [], managedPreference: nil, summary: "Put back from the system quarantine"))
+    public static let quarantineExpireSystem = privileged(RemediationAction(
+        id: "quarantine.expireSystem", tier: .t3, fact: "quarantine.plans", compliantValues: [], managedPayloadTypes: [],
+        managedDeclarationTypes: [], managedPreference: nil, summary: "Delete for good from the system quarantine"))
+
+    private static func privileged(_ action: RemediationAction) -> RemediationAction {
+        var a = action
+        a.privileged = true
+        return a
+    }
+
     public static let all: [RemediationAction] = [firewallEnable, firewallStealthEnable, gatekeeperEnable, securityAutoInstall,
                                                   exceptionAdd, exceptionRemove, cleanupQuarantine, quarantineExpire,
+                                                  cleanupQuarantineSystem, quarantineRestoreSystem, quarantineExpireSystem,
                                                   firewallRestore, firewallStealthRestore, securityAutoInstallRestore]
 
     /// The undo action for `actionID`, if Farrier can undo it.
@@ -264,8 +293,12 @@ public enum RemediationCatalog {
             return "accept it again with `farrier exceptions add`"
         case cleanupQuarantine.id:
             return "put it back from the quarantine with `farrier restore`"
-        case quarantineExpire.id:
+        case quarantineExpire.id, quarantineExpireSystem.id:
             return "the items were deleted for good; there is no undo"
+        case cleanupQuarantineSystem.id:
+            return "put it back with `farrier restore`"
+        case quarantineRestoreSystem.id:
+            return "clean it up again with `farrier plan cleanup --system`"
         default:
             return "Farrier can't undo `\(actionID)`"
         }

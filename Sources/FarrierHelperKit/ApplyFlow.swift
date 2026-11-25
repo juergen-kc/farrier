@@ -244,7 +244,7 @@ public enum PlanApplier {
     public static func apply(_ plan: Plan, now: Date = Date()) throws -> ApplyReply {
         guard Int64(now.timeIntervalSince1970) < plan.expiresAt else { throw PlanApplyError.expired }
         guard plan.host == HostIdentity.hardwareUUID() else { throw PlanApplyError.otherHost }
-        guard plan.tier.needsApproval else { throw PlanApplyError.notReady("only plans that need approval (T3/T4) go to the helper") }
+        guard plan.needsApproval else { throw PlanApplyError.notReady("only plans that need approval (T3/T4, or system cleanup) go to the helper") }
 
         try checkApprovalKey()
 

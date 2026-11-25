@@ -135,6 +135,9 @@ struct PlanCleanup: ParsableCommand {
     @Option(name: .customLong("path"), help: "Only this candidate path (repeatable), as the scan lists it.")
     var paths: [String] = []
 
+    @Flag(help: "System locations (/Library/Caches, /Library/Logs) instead: the privileged helper moves them, after Touch ID or your password.")
+    var system = false
+
     @Flag(help: "Output JSON.")
     var json = false
 
@@ -147,7 +150,7 @@ struct PlanCleanup: ParsableCommand {
             let home = FileManager.default.homeDirectoryForCurrentUser.path
             let full = paths.map { $0.hasPrefix("~/") ? home + $0.dropFirst(1) : $0 }
             out = try Operations.planCleanup(FarrierContext.live(actor: "cli"), ruleIDs: rules.isEmpty ? nil : Set(rules),
-                                             minAge: minAge, paths: full.isEmpty ? nil : Set(full))
+                                             minAge: minAge, paths: full.isEmpty ? nil : Set(full), system: system)
         } catch let error as OperationError {
             note("\(error)")
             throw ExitCode(2)
@@ -156,7 +159,7 @@ struct PlanCleanup: ParsableCommand {
             try Output.json(out)
             return
         }
-        if let plan = out.plan { printPlan(plan) } else { print("nothing to clean up") }
+        if let plan = out.plan { printPlan(plan) } else { print(out.next) }
         if !out.skipped.isEmpty {
             print("left out:")
             for s in out.skipped { print("  \(s.ruleID): \(s.reason)") }
@@ -178,6 +181,9 @@ struct PlanExpire: ParsableCommand {
     @Option(name: .customLong("plan"), help: "Only this cleanup plan's quarantine (id or prefix, repeatable; see `farrier quarantine list`).")
     var plans: [String] = []
 
+    @Flag(help: "The system quarantine (plans marked [system] in `farrier quarantine list`) instead of yours.")
+    var system = false
+
     @Flag(help: "Output JSON.")
     var json = false
 
@@ -187,7 +193,7 @@ struct PlanExpire: ParsableCommand {
         redaction.apply()
         let out: PlanOutput
         do {
-            out = try Operations.planExpiry(FarrierContext.live(actor: "cli"), ids: plans.isEmpty ? nil : plans)
+            out = try Operations.planExpiry(FarrierContext.live(actor: "cli"), ids: plans.isEmpty ? nil : plans, system: system)
         } catch let error as OperationError {
             note("\(error)")
             throw ExitCode(2)
@@ -253,7 +259,7 @@ func printPlan(_ plan: Plan) {
     let expires = Date(timeIntervalSince1970: TimeInterval(plan.expiresAt))
     let left = max(0, Int(expires.timeIntervalSinceNow / 60))
     print("plan \(plan.id)  (\(plan.tier.rawValue), hash \(plan.shortHash()), expires in \(left) min)")
-    if plan.items.allSatisfy({ $0.action == RemediationCatalog.cleanupQuarantine.id }) {
+    if plan.items.allSatisfy({ $0.action.hasPrefix("cleanup.") }) {
         var total: Int64 = 0
         for item in plan.items {
             let o = item.observed.object ?? [:]
@@ -264,11 +270,13 @@ func printPlan(_ plan: Plan) {
             print("  [T2] \(ByteCount.format(bytes).padding(toLength: 9, withPad: " ", startingAt: 0)) \(Int(o["ageDays"]?.number ?? 0))d  \(path)")
             print("        rule \(item.ruleID), \(regen)")
         }
-        print("moves \(plan.items.count) item(s), \(ByteCount.format(total)), into Farrier's quarantine; "
+        let which = plan.needsApproval ? "the system quarantine (the privileged helper moves them)" : "Farrier's quarantine"
+        print("moves \(plan.items.count) item(s), \(ByteCount.format(total)), into \(which); "
               + "`farrier restore` puts them back for \(Quarantine.retention / 86_400) days")
+        if plan.needsApproval { print("applying it asks for Touch ID or your password on this Mac") }
         return
     }
-    if plan.items.allSatisfy({ $0.action == RemediationCatalog.quarantineExpire.id }) {
+    if plan.items.allSatisfy({ $0.action == RemediationCatalog.quarantineExpire.id || $0.action == RemediationCatalog.quarantineExpireSystem.id }) {
         let f = DateFormatter()
         f.dateStyle = .medium
         f.timeStyle = .none
@@ -295,7 +303,7 @@ func printPlan(_ plan: Plan) {
             print("        \(label): \(item.observed)  → action \(item.action)")
         }
     }
-    if plan.tier.needsApproval { print("applying it asks for Touch ID or your password on this Mac") }
+    if plan.needsApproval { print("applying it asks for Touch ID or your password on this Mac") }
 }
 
 struct PlanShow: ParsableCommand {
@@ -371,7 +379,7 @@ struct Apply: ParsableCommand {
     func run() throws {
         let plan = try PlanStore.default.load(id)
         if !json { printPlan(plan) }
-        if plan.tier == .t2 && !yes {
+        if plan.tier == .t2 && !plan.needsApproval && !yes {
             // T2 isn't approved on the Mac: it's confirmed here (docs/ARCHITECTURE.md, tiers).
             guard isatty(0) != 0 else {
                 note("not applied: confirm with --yes (no terminal to ask in)")
@@ -383,7 +391,7 @@ struct Apply: ParsableCommand {
                 throw ExitCode(1)
             }
         }
-        if plan.tier.needsApproval { try Helper.macOnly() }
+        if plan.needsApproval { try Helper.macOnly() }
         // The same operation as the MCP tool `apply_plan`, journal entries included.
         let out = try Operations.apply(FarrierContext.live(actor: "cli"), id: plan.id)
         if json {
@@ -394,7 +402,7 @@ struct Apply: ParsableCommand {
         for r in out.results {
             print("\(r.outcome.rawValue.padding(toLength: 16, withPad: " ", startingAt: 0)) \(r.ruleID): \(r.detail.map(shortPathsIn) ?? "")")
         }
-        if plan.tier == .t2 {
+        if plan.tier == .t2 && !plan.needsApproval {
             let moved = out.results.filter { $0.outcome == .applied }.count
             if moved > 0 { print("\nmoved \(moved) item(s); put them back with: farrier restore \(plan.id.prefix(8))") }
             if out.error == nil && moved > 0 { return }   // items in use again are refused, not a failed cleanup
@@ -574,7 +582,8 @@ struct QuarantineCommand: ParsableCommand {
                 let when = f.string(from: Date(timeIntervalSince1970: TimeInterval(p.expiresAt)))
                 let expiry = p.expired ? "its 7 days ended \(when): restorable until it's deleted" : "kept until \(when)"
                 let restored = p.restored > 0 ? ", \(p.restored) restored" : ""
-                print("\(p.planID.prefix(8))  \(ByteCount.format(p.bytes).padding(toLength: 9, withPad: " ", startingAt: 0)) \(p.quarantined) item(s)\(restored), \(expiry)")
+                let tag = p.system == true ? "  [system]" : ""
+                print("\(p.planID.prefix(8))  \(ByteCount.format(p.bytes).padding(toLength: 9, withPad: " ", startingAt: 0)) \(p.quarantined) item(s)\(restored), \(expiry)\(tag)")
                 for item in p.items ?? [] where items {
                     print("    \(item.state == .restored ? "restored" : "        ")  \(shortPath(item.original))")
                 }
