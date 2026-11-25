@@ -133,6 +133,19 @@ public enum Runbooks {
             weren't compared and why, and that a snapshot only sees what Farrier collects.
             """
         },
+        Runbook(name: "why-did-it-wake", title: "Why did my Mac wake (or not sleep)?",
+                description: "Explain recent wakes, dark wakes and what keeps the Mac awake",
+                arguments: [], tools: ["power_history", "log_query"]) { _ in
+            """
+            Explain why this Mac woke up or didn't sleep. Call power_history (days: 3, or what I name). Summarise the \
+            sleep and wake pattern, the most frequent wake reasons in plain words (EC.LidOpen is the lid, RTC/Maintenance \
+            is a scheduled maintenance wake, a network or Bluetooth device, a USB device, …), and the power assertions \
+            that keep it awake right now, by process. If a reason needs more context, call log_query with \
+            subsystem "com.apple.powermanagement" around that time (a short window). Say which wakes are normal (Power \
+            Nap, maintenance) and what I could change myself (Energy settings, Wake for network access, the app holding \
+            an assertion); Farrier doesn't change these settings.
+            """
+        },
         Runbook(name: "management-overview", title: "Who manages this Mac?",
                 description: "Explain MDM enrollment, configuration profiles and which settings they control",
                 arguments: [], tools: ["posture_check", "inventory"]) { _ in

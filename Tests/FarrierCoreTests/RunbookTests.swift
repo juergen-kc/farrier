@@ -14,7 +14,7 @@ private func text(_ r: GetPrompt.Result) -> String {
 struct RunbookTests {
     @Test func everyRunbookUsesOnlyToolsThatExistAndNamesThem() throws {
         let tools = Set(ToolCatalog.tools.map(\.name))
-        #expect(Runbooks.all.count >= 9)
+        #expect(Runbooks.all.count >= 10)
         #expect(Runbooks.all.contains { $0.name == "free-up-space" })
         #expect(Set(Runbooks.all.map(\.name)).count == Runbooks.all.count)
         for runbook in Runbooks.all {
