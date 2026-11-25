@@ -148,7 +148,7 @@ public struct InventorySection: Sendable, Codable, Equatable {
     public let flagged: Int
 }
 
-public struct InventoryReport: Sendable, Codable {
+public struct InventoryReport: Sendable, Codable, Equatable {
     public let sections: [InventorySection]
 }
 

@@ -9,12 +9,16 @@ public enum ResourceCatalog {
     static let userJournalURI = "farrier://journal/recent"
     static let helperJournalURI = "farrier://journal/helper"
     static let planPrefix = "farrier://plan/"
+    static let snapshotPrefix = "farrier://snapshot/"
     static let journalEntries = 50
 
     public static let templates: [Resource.Template] = [
         .init(uriTemplate: "farrier://plan/{id}", name: "plan", title: "Saved plan",
               description: "A saved plan by id (or a unique prefix of at least 4 characters): its items, tier, hash, expiry "
                   + "and whether applying it needs approval on the Mac.",
+              mimeType: "application/json"),
+        .init(uriTemplate: "farrier://snapshot/{id}", name: "snapshot", title: "Saved snapshot",
+              description: "A saved snapshot by id, unique prefix or `latest`: the inventory and settings as they were then.",
               mimeType: "application/json"),
     ]
 
@@ -36,6 +40,12 @@ public enum ResourceCatalog {
                                           + plan.items.map(\.description).joined(separator: "; "),
                                       mimeType: "application/json"))
         }
+        for snap in ctx.snapshots.list().prefix(10) {
+            let when = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: TimeInterval(snap.createdAt)))
+            resources.append(Resource(name: "snapshot-\(snap.id.prefix(8))", uri: snapshotPrefix + snap.id,
+                                      title: "Snapshot \(snap.id.prefix(8))\(snap.label.map { ": \($0)" } ?? "")",
+                                      description: "Inventory and settings saved \(when).", mimeType: "application/json"))
+        }
         return resources
     }
 
@@ -51,6 +61,10 @@ public enum ResourceCatalog {
         case _ where uri.hasPrefix(planPrefix):
             let id = String(uri.dropFirst(planPrefix.count))
             do { data = try encode(Operations.show(ctx, id: id, now: now)) } catch {
+                throw MCPError.invalidParams("\(error)")
+            }
+        case _ where uri.hasPrefix(snapshotPrefix):
+            do { data = try encode(Operations.snapshotLoad(ctx, String(uri.dropFirst(snapshotPrefix.count)))) } catch {
                 throw MCPError.invalidParams("\(error)")
             }
         default:
@@ -76,6 +90,7 @@ public enum ToolProgress {
         switch tool {
         case "apply_plan": what = "waiting for the user to approve on the Mac (Touch ID or password), then applying"
         case "inventory": what = "collecting the inventory (apps and their signatures)"
+        case "snapshot_create", "snapshot_diff": what = "collecting the inventory and settings"
         case "cleanup_scan": what = "measuring caches and logs"
         case "disk_usage": what = "measuring caches, developer data and apps"
         case "cleanup_plan": what = "measuring caches and logs, then planning"

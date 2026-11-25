@@ -119,6 +119,20 @@ public enum Runbooks {
             apply it when I've said so here.
             """
         },
+        Runbook(name: "what-changed", title: "What changed on this Mac?",
+                description: "Compare the Mac with a saved snapshot: new or removed apps, launch items, profiles, grants, admins and settings",
+                arguments: [], tools: ["snapshot_list", "snapshot_diff", "snapshot_create"]) { _ in
+            """
+            Tell me what changed on this Mac. Call snapshot_list. If there are no snapshots, say that changes can only be \
+            seen from a snapshot onwards, and offer to save one with snapshot_create (only if I agree). Otherwise call \
+            snapshot_diff (the latest snapshot against now, or the two I name) and summarise: apps, launch agents and \
+            daemons, system extensions, profiles, privacy grants, administrators and listening ports that were added, \
+            removed or changed (for a changed app or launch item, say what: version, signer, notarization), and settings \
+            that changed. Point out what deserves a look first: new launch items or system extensions, new privacy \
+            grants or administrators, newly listening ports, and anything whose signature got worse. Say which sections \
+            weren't compared and why, and that a snapshot only sees what Farrier collects.
+            """
+        },
         Runbook(name: "management-overview", title: "Who manages this Mac?",
                 description: "Explain MDM enrollment, configuration profiles and which settings they control",
                 arguments: [], tools: ["posture_check", "inventory"]) { _ in
