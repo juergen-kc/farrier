@@ -67,11 +67,24 @@ public enum CrashReports {
         let bug = (h["bug_type"] as? String) ?? (h["bug_type"] as? Int).map(String.init)
         let process = (h["app_name"] as? String) ?? (h["name"] as? String) ?? (h["procName"] as? String)
             ?? String(file.split(separator: "-").first ?? "?")
-        return CrashReportSummary(file: file, path: path, process: process, version: h["app_version"] as? String,
+        let version = (h["app_version"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        return CrashReportSummary(file: file, path: path, process: process, version: version,
                                   time: h["timestamp"] as? String, kind: kind(bug), bugType: bug, bytes: bytes)
     }
 
-    /// Reports newer than `since`, newest first (by file time). `process`: only that process (case-insensitive).
+    /// The time a report was written, from its header (`2026-11-25 15:23:19.00 -0700`); macOS can touch the file later.
+    static func reportDate(_ timestamp: String?) -> Date? {
+        guard let timestamp else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        for format in ["yyyy-MM-dd HH:mm:ss.SS Z", "yyyy-MM-dd HH:mm:ss Z", "yyyy-MM-dd HH:mm:ss.SSSS Z"] {
+            f.dateFormat = format
+            if let d = f.date(from: timestamp) { return d }
+        }
+        return nil
+    }
+
+    /// Reports newer than `since`, newest first (by the time in the report, else the file's). `process`: only that process (case-insensitive).
     /// `includeOther`: also bug types other than crashes, panics and hangs (analytics, resource reports, …).
     public static func list(home: String, since: Date, process: String? = nil, includeOther: Bool = false,
                             limit: Int = 50) -> CrashReportList {
@@ -84,14 +97,16 @@ public enum CrashReports {
             for name in names where name.hasSuffix(".ips") || name.hasSuffix(".panic") {
                 let path = "\(dir)/\(name)"
                 guard let attrs = try? fm.attributesOfItem(atPath: path), (attrs[.type] as? FileAttributeType) == .typeRegular,
-                      let modified = attrs[.modificationDate] as? Date, modified >= since else { continue }
+                      let modified = attrs[.modificationDate] as? Date else { continue }
                 guard let handle = FileHandle(forReadingAtPath: path) else { continue }
                 let head = handle.readData(ofLength: 64 * 1024)
                 try? handle.close()
                 guard let s = summary(path: path, data: head, bytes: (attrs[.size] as? NSNumber)?.int64Value ?? 0) else { continue }
                 if !includeOther && !["crash", "panic", "hang"].contains(s.kind) { continue }
                 if let process, s.process.lowercased() != process.lowercased() { continue }
-                found.append((modified, s))
+                let written = reportDate(s.time) ?? modified
+                guard written >= since else { continue }
+                found.append((written, s))
             }
         }
         let sorted = found.sorted { $0.0 > $1.0 }.prefix(limit).map(\.1)

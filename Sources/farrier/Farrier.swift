@@ -459,7 +459,7 @@ struct DebugCommand: ParsableCommand {
                 let d = try DebugCommand.run { try Operations.crashReport(ctx, name: report) }
                 if json { try Output.json(d); return }
                 print("\(d.summary.process) \(d.summary.version ?? "") — \(d.summary.kind), \(d.summary.time ?? "?")")
-                if let os = d.osVersion { print("macOS \(os)") }
+                if let os = d.osVersion { print(os.hasPrefix("macOS") ? os : "macOS \(os)") }
                 if let t = d.exceptionType { print("exception: \(t)\(d.signal.map { " (\($0))" } ?? "")") }
                 if let t = d.termination { print("termination: \(t)") }
                 for line in d.appSpecific ?? [] { print("app note: \(line)") }

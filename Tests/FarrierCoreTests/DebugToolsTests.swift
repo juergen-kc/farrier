@@ -93,7 +93,7 @@ struct DebugToolsTests {
                                    ["imageIndex": 0, "symbol": "Editor.save()"], ["imageIndex": 1, "symbol": "start"]]]],
                                "usedImages": [["name": "Editor"], ["name": "dyld"]]])
         FileManager.default.createFile(atPath: "\(dir)/Editor-2026-11-25-070000.ips", contents: crash)
-        FileManager.default.createFile(atPath: "\(dir)/Kernel-2026-11-24.panic.ips", contents: ips(["bug_type": "210", "timestamp": "2026-11-24"],
+        FileManager.default.createFile(atPath: "\(dir)/Kernel-2026-11-24.panic.ips", contents: ips(["bug_type": "210", "timestamp": "2026-11-24 09:00:00.00 -0800"],
                                                                                                 body: ["panicString": "panic(cpu 0): watchdog timeout"]))
         FileManager.default.createFile(atPath: "\(dir)/analytics.ips", contents: ips(["bug_type": "211", "name": "Analytics"], body: [:]))
         FileManager.default.createFile(atPath: "\(dir)/notes.txt", contents: Data("x".utf8))
@@ -103,6 +103,14 @@ struct DebugToolsTests {
         #expect(CrashReports.list(home: home.root, since: Date(timeIntervalSince1970: 0), includeOther: true).reports.count == 3)
         #expect(CrashReports.list(home: home.root, since: Date(timeIntervalSince1970: 0), process: "editor").reports.map(\.process) == ["Editor"])
         #expect(CrashReports.list(home: home.root, since: Date().addingTimeInterval(3_600)).reports.isEmpty)
+        // The report's own time counts, not the file's (macOS can touch old reports): an old report, a new file.
+        FileManager.default.createFile(atPath: "\(dir)/Old-2026-01-01.ips", contents: ips(
+            ["app_name": "Old", "app_version": "", "timestamp": "2026-01-01 10:00:00.00 -0800", "bug_type": "309"], body: [:]))
+        let recent = CrashReports.list(home: home.root, since: CrashReports.reportDate("2026-11-01 00:00:00.00 -0800")!)
+        #expect(!recent.reports.contains { $0.process == "Old" })
+        let everything = CrashReports.list(home: home.root, since: Date(timeIntervalSince1970: 0)).reports
+        #expect(everything.first?.process == "Editor" && everything.last?.process == "Old")   // newest first, by report time
+        #expect(everything.last?.version == nil)
 
         let d = try CrashReports.detail(home: home.root, name: "Editor-2026-11-25-070000.ips")
         #expect(d.exceptionType == "EXC_BAD_ACCESS" && d.signal == "SIGSEGV" && d.termination == "Segmentation fault: 11")
