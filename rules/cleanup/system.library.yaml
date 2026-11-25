@@ -16,6 +16,7 @@ rules:
         exclude: ["com.apple.*", "Homebrew", "ColorSync"]
     regenerable: true
     minAge: 30d
+    minSize: 1MB                  # tiny ones free nothing worth a root change
     evidence: >
       Caches that apps and installers keep for every user, which they rebuild when missing. Only caches nothing
       has written to or read for 30 days are listed, and Apple's own are left alone.
@@ -27,9 +28,12 @@ rules:
     privileged: true
     targets:
       - path: /Library/Logs/*
-        exclude: ["DiagnosticReports", "com.apple.*", "CrashReporter"]
+        # Folders macOS creates for its own services, whose names don't start with com.apple.
+        exclude: ["DiagnosticReports", "com.apple.*", "CrashReporter", "WindowServer", "Xsan", "hidfw-crashlogs",
+                  "DiagnosticMessages", "Bluetooth", "SystemMigration", "PaniclogArchives", "Install.log*"]
     regenerable: false            # nothing recreates old logs; crash reports are kept
     minAge: 30d
+    minSize: 1MB                  # empty and tiny folders free nothing, and a service may expect its folder
     evidence: >
       Logs that installers and system services wrote and no longer write to. They only help when looking into a
       problem from that time; crash reports are never listed.
