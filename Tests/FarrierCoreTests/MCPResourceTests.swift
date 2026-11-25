@@ -6,12 +6,14 @@ import Testing
 
 private func context() throws -> FarrierContext {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("farrier-res-\(UUID().uuidString)")
-    return FarrierContext(
+    var ctx = FarrierContext(
         collectFacts: { CollectionResult(facts: [:], notes: []) },
         rulePaths: [repoRoot.appendingPathComponent("rules").path],
         plans: PlanStore(directory: dir.appendingPathComponent("plans")),
         journal: Journal(url: dir.appendingPathComponent("journal.jsonl")),
         host: { "H" }, applyThroughHelper: { _ in throw OperationError("none") }, actor: "mcp:test")
+    ctx.snapshots = SnapshotStore(directory: dir.appendingPathComponent("snapshots").path)
+    return ctx
 }
 
 private func plan(_ id: String, expiresAt: Int64) -> Plan {
@@ -29,7 +31,7 @@ struct MCPResourceTests {
         _ = try ctx.plans.save(plan("bbbbbbbb-0000-4000-8000-000000000002", expiresAt: 1_999_999_000))   // expired
         let uris = ResourceCatalog.list(ctx, now: now).map(\.uri)
         #expect(uris == ["farrier://journal/recent", "farrier://journal/helper", "farrier://plan/aaaaaaaa-0000-4000-8000-000000000001"])
-        #expect(ResourceCatalog.templates.map(\.uriTemplate) == ["farrier://plan/{id}"])
+        #expect(ResourceCatalog.templates.map(\.uriTemplate) == ["farrier://plan/{id}", "farrier://snapshot/{id}"])
         #expect(try ctx.plans.load(exactID: "aaaaaaaa-0000-4000-8000-000000000001").id == "aaaaaaaa-0000-4000-8000-000000000001")
         #expect(throws: PlanError.self) { try ctx.plans.load(exactID: "aaaa") }   // exact ids only
         #expect(throws: PlanError.self) { try ctx.plans.load(exactID: "../../etc/passwd") }

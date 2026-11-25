@@ -60,6 +60,8 @@ public struct FarrierContext {
     public var localSnapshots: () -> Int? = { DiskUsage.liveLocalSnapshots() }
     /// Put in front of absolute paths `disk_usage` measures (`/Applications`); tests point it at a folder.
     public var systemRoot = ""
+    /// Saved snapshots of the inventory and settings.
+    public var snapshots: SnapshotStore = .default
     /// The privileged helper's scan of system locations, and its root-only quarantine.
     public var scanSystemCleanup: () throws -> CleanupReport = {
         #if os(macOS)
@@ -244,6 +246,25 @@ public struct AutoExpiryStatus: Codable {
     public let scheduled: Bool
 }
 
+public struct SnapshotSummary: Codable {
+    public let id: String
+    public let createdAt: Int64
+    public let label: String?
+    /// Items per inventory section (absent for sections that couldn't be read then).
+    public let counts: [String: Int]
+    public let unavailable: [String]
+
+    init(_ s: Snapshot) {
+        id = s.id
+        createdAt = s.createdAt
+        label = s.label
+        var c: [String: Int] = [:]
+        for sec in s.inventory.sections where sec.available { c[sec.id] = sec.items.count }
+        counts = c
+        unavailable = s.inventory.sections.filter { !$0.available }.map(\.id)
+    }
+}
+
 public struct RestoreOutput: Codable {
     public let planID: String
     public let results: [ItemResult]
@@ -423,6 +444,37 @@ public enum Operations {
         }
         let collected = ctx.collectFacts().merging(ctx.collectInventory())
         return Inventory.build(facts: collected.facts, notes: collected.notes, only: sections, flaggedOnly: flaggedOnly)
+    }
+
+    // MARK: Snapshots
+
+    static func liveSnapshot(_ ctx: FarrierContext, label: String?, now: Date) -> Snapshot {
+        Snapshot.take(ctx.collectFacts().merging(ctx.collectInventory()), host: ctx.host(), label: label, now: now)
+    }
+
+    /// Saves a snapshot of the inventory and settings, to diff against later. Writes only Farrier's own state.
+    public static func snapshotCreate(_ ctx: FarrierContext, label: String? = nil, now: Date = Date()) throws -> SnapshotSummary {
+        if let label, label.count > 200 { throw OperationError("`label` is longer than 200 characters") }
+        let s = liveSnapshot(ctx, label: label, now: now)
+        do { try ctx.snapshots.save(s) } catch { throw OperationError("\(error)") }
+        return SnapshotSummary(s)
+    }
+
+    public static func snapshotList(_ ctx: FarrierContext) -> [SnapshotSummary] { ctx.snapshots.list().map(SnapshotSummary.init) }
+
+    public static func snapshotLoad(_ ctx: FarrierContext, _ id: String) throws -> Snapshot {
+        do { return try ctx.snapshots.load(id) } catch let e as PlanError { throw OperationError(e.description) }
+    }
+
+    /// What changed between two snapshots (ids, prefixes or `latest`); `to` nil means now (collected, not saved).
+    public static func snapshotDiff(_ ctx: FarrierContext, from: String = "latest", to: String? = nil, now: Date = Date()) throws -> SnapshotDiff {
+        let a = try snapshotLoad(ctx, from)
+        if let to { return SnapshotDiffer.diff(a, try snapshotLoad(ctx, to)) }
+        return SnapshotDiffer.diff(a, liveSnapshot(ctx, label: nil, now: now), toIsLive: true)
+    }
+
+    public static func snapshotDelete(_ ctx: FarrierContext, _ id: String) throws -> SnapshotSummary {
+        do { return SnapshotSummary(try ctx.snapshots.delete(id)) } catch let e as PlanError { throw OperationError(e.description) }
     }
 
     public static func exceptions(_ ctx: FarrierContext) -> ExceptionsOutput {

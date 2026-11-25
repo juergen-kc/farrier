@@ -13,7 +13,7 @@ struct Farrier: AsyncParsableCommand {
         abstract: "Keep your Mac sound: hygiene, posture, drift, patching and debugging.",
         discussion: "v0.1: rule packs, fact collection, posture evaluation, the privileged helper, and plan → approve → apply for the first fix (firewall). `farrier mcp` serves the same over MCP (stdio).",
         version: version,
-        subcommands: [Posture.self, InventoryCommand.self, DiskUsageCommand.self, CleanupCommand.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Undo.self, Restore.self, QuarantineCommand.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self, Uninstall.self]
+        subcommands: [Posture.self, InventoryCommand.self, SnapshotCommand.self, DiskUsageCommand.self, CleanupCommand.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Undo.self, Restore.self, QuarantineCommand.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self, Uninstall.self]
     )
 }
 
@@ -244,6 +244,125 @@ struct InventoryCommand: ParsableCommand {
                 let mark = Inventory.needsALook(item) ? "!" : " "
                 print(" \(mark) \(Inventory.describe(item, section: section.id))")
             }
+        }
+    }
+}
+
+// MARK: - farrier snapshot
+
+struct SnapshotCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "snapshot",
+        abstract: "Save the inventory and settings, and see what changed since.",
+        subcommands: [Create.self, List.self, Diff.self, Delete.self]
+    )
+
+    static func when(_ t: Int64) -> String {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f.string(from: Date(timeIntervalSince1970: TimeInterval(t)))
+    }
+
+    static func fail(_ e: Error) -> ExitCode {
+        note("\(e)")
+        return ExitCode(2)
+    }
+
+    struct Create: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Save a snapshot (the 50 newest are kept).")
+
+        @Option(help: "A note to recognise it by, e.g. \"before the update\".")
+        var label: String?
+
+        @Flag(help: "Output JSON.")
+        var json = false
+
+        func run() throws {
+            let s: SnapshotSummary
+            do { s = try Operations.snapshotCreate(FarrierContext.live(actor: "cli"), label: label) } catch { throw SnapshotCommand.fail(error) }
+            if json { try Output.json(s); return }
+            let counts = s.counts.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }.joined(separator: ", ")
+            print("snapshot \(s.id.prefix(8)) saved\(s.label.map { " (\($0))" } ?? ""): \(counts)")
+            if !s.unavailable.isEmpty { print("not readable now: \(s.unavailable.joined(separator: ", "))") }
+            print("later: farrier snapshot diff \(s.id.prefix(8))")
+        }
+    }
+
+    struct List: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "List saved snapshots, newest first.")
+
+        @Flag(help: "Output JSON.")
+        var json = false
+
+        func run() throws {
+            let all = Operations.snapshotList(FarrierContext.live(actor: "cli"))
+            if json { try Output.json(all); return }
+            if all.isEmpty { print("no snapshots yet: `farrier snapshot create`") }
+            for s in all { print("\(s.id.prefix(8))  \(SnapshotCommand.when(s.createdAt))\(s.label.map { "  \($0)" } ?? "")") }
+        }
+    }
+
+    struct Diff: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "What changed: since a snapshot (default: the latest), or between two.",
+            discussion: "A section that couldn't be read in one of the two is shown as not compared, never as removed."
+        )
+
+        @Argument(help: "From this snapshot (id, prefix or `latest`).")
+        var from: String = "latest"
+
+        @Argument(help: "To this snapshot (default: now).")
+        var to: String?
+
+        @Flag(help: "Output JSON.")
+        var json = false
+
+        @OptionGroup var redaction: RedactOption
+
+        func run() throws {
+            redaction.apply()
+            let d: SnapshotDiff
+            do { d = try Operations.snapshotDiff(FarrierContext.live(actor: "cli"), from: from, to: to) } catch { throw SnapshotCommand.fail(error) }
+            if json { try Output.json(d); return }
+            func ref(_ r: SnapshotDiff.SnapshotRef) -> String {
+                r.id == nil ? "now" : "\(r.id!.prefix(8)) (\(SnapshotCommand.when(r.createdAt))\(r.label.map { ", \($0)" } ?? ""))"
+            }
+            print("from \(ref(d.from)) to \(ref(d.to))")
+            func show(_ v: FactValue?) -> String { v.map { $0.string ?? $0.description } ?? "(none)" }
+            for sec in d.sections {
+                if sec.notCompared != nil { continue }
+                guard !(sec.added.isEmpty && sec.removed.isEmpty && sec.changed.isEmpty) else { continue }
+                print("\n\(sec.title)")
+                for a in sec.added { print("  + \(a)") }
+                for r in sec.removed { print("  - \(r)") }
+                for c in sec.changed {
+                    print("  ~ \(c.summary)")
+                    for f in c.fields.prefix(6) { print("      \(f.field): \(show(f.before)) → \(show(f.after))") }
+                }
+            }
+            if !d.facts.isEmpty {
+                print("\nSettings")
+                for f in d.facts { print("  ~ \(f.field): \(show(f.before)) → \(show(f.after))") }
+            }
+            if d.changes == 0 { print("\nno changes") }
+            let skipped = d.sections.compactMap { sec in sec.notCompared.map { "\(sec.id) (\($0))" } }
+            if !skipped.isEmpty { print("\nsections not compared (unreadable in one of the two): \(skipped.joined(separator: "; "))") }
+            if !d.factsNotCompared.isEmpty { print("settings not compared: \(d.factsNotCompared.joined(separator: ", "))") }
+        }
+    }
+
+    struct Delete: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Delete a saved snapshot.")
+
+        @Argument(help: "Snapshot id or prefix.")
+        var id: String
+
+        func run() throws {
+            do {
+                let s = try Operations.snapshotDelete(FarrierContext.live(actor: "cli"), id)
+                print("deleted snapshot \(s.id.prefix(8))")
+            } catch { throw SnapshotCommand.fail(error) }
         }
     }
 }
