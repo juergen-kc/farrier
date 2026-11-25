@@ -52,7 +52,7 @@ with on-device approval for T3 and T4.
 | `plan_undo` | T0 | Plan undoing an applied plan's changes (firewall, stealth mode, automatic security updates), from the helper's journal. |
 | `plan_show` | T0 | Show a plan. |
 | `apply_plan` | plan's tier | Apply a plan. T3/T4 trigger Touch ID on the Mac. Cleanup plans (T2) apply in the server's process without a prompt: every item is checked against its rule and fingerprint again, then moved into the quarantine; items used or changed since planning are refused and stay. Returns per-item results. |
-| `quarantine_list` | T0 | Implemented. Quarantined cleanup plans: items, space held (freed only at expiry), and expiry date; `details` lists each item. |
+| `quarantine_list` | T0 | Implemented. Quarantined cleanup plans: items, space held (freed only at expiry), and expiry date; `details` lists each item. `autoExpiry` says whether items are deleted automatically after their 7 days (turned on in Terminal with `farrier quarantine auto-expire on`, never through MCP) and, if it's on but not running, why. |
 | `quarantine_plan_expiry` | T0 | Implemented. Plan deleting quarantined items for good (T3): every cleanup plan past its 7 days, or only `planIDs` (also earlier). Each item records the number of items and bytes; applying refuses if that changed. `apply_plan` asks for Touch ID or the password on the Mac first, like T4. |
 | `quarantine_restore` | T2 | Implemented. Put a cleanup plan's items back, all or only `paths` (original paths). An item whose path is taken again stays in the quarantine. |
 

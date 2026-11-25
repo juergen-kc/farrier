@@ -459,8 +459,85 @@ struct QuarantineCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "quarantine",
         abstract: "Inspect Farrier's quarantine.",
-        subcommands: [List.self]
+        subcommands: [List.self, AutoExpire.self, ExpireDue.self]
     )
+
+    static func describe(_ s: AutoExpiryStatus) -> String {
+        guard s.enabled else {
+            return "automatic deletion: off (`farrier quarantine auto-expire on` deletes items once their 7 days are over)"
+        }
+        if let problem = s.problem { return "automatic deletion: on, but not running: \(problem)" }
+        let schedule = s.scheduled ? "daily" : "approved, but the daily schedule isn't installed: turn it on again"
+        return "automatic deletion: on (\(schedule)), once items' 7 days are over"
+    }
+
+    struct AutoExpire: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "auto-expire",
+            abstract: "Delete quarantined items automatically once their 7 days are over.",
+            discussion: """
+            `on` asks for Touch ID or your password once: deleting for good is T3, and this approves it in advance for \
+            items past their 7 days only. A daily background job then deletes them. The approval is tied to the \
+            approval key, so after the key's monthly rotation the job stops until you turn it on again. `off` needs \
+            no approval.
+            """
+        )
+
+        @Argument(help: "on, off or status.")
+        var state: String = "status"
+
+        @Flag(help: "Output JSON.")
+        var json = false
+
+        func run() throws {
+            let ctx = FarrierContext.live(actor: "cli")
+            let status: AutoExpiryStatus
+            do {
+                switch state {
+                case "on":
+                    try Helper.macOnly()
+                    let bundle = Bundle.main.bundlePath
+                    guard bundle.hasSuffix(".app"), let exe = Bundle.main.executablePath else {
+                        note("turn it on with the installed farrier (from Farrier.app), not a development build")
+                        throw ExitCode(2)
+                    }
+                    status = try Operations.enableAutoExpiry(ctx, executable: exe)
+                case "off": status = try Operations.disableAutoExpiry(ctx)
+                case "status": status = Operations.autoExpiryStatus(ctx)
+                default:
+                    note("expected on, off or status")
+                    throw ExitCode(2)
+                }
+            } catch let error as OperationError {
+                note("\(error)")
+                throw ExitCode(1)
+            }
+            if json { try Output.json(status) } else { print(QuarantineCommand.describe(status)) }
+        }
+    }
+
+    struct ExpireDue: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "expire-due",
+            abstract: "Delete quarantined items past their 7 days, under the approval `auto-expire on` saved (what the daily job runs)."
+        )
+
+        @Flag(help: "Output JSON.")
+        var json = false
+
+        func run() throws {
+            let out = Operations.runDueExpiry(FarrierContext.live(actor: "schedule"))
+            if json {
+                try Output.json(out)
+            } else {
+                let stamp = ISO8601DateFormatter().string(from: Date())
+                if out.results.isEmpty && out.error == nil { print("\(stamp) nothing past its 7 days") }
+                for r in out.results { print("\(stamp) \(r.outcome.rawValue) \(r.detail.map(shortPathsIn) ?? "")") }
+                if let e = out.error { print("\(stamp) not run: \(e)") }
+            }
+            if out.error != nil || out.results.contains(where: { $0.outcome != .applied }) { throw ExitCode(1) }
+        }
+    }
 
     struct List: ParsableCommand {
         static let configuration = CommandConfiguration(abstract: "List quarantined cleanup plans and what they hold.")
@@ -480,7 +557,11 @@ struct QuarantineCommand: ParsableCommand {
                 try Output.json(out)
                 return
             }
-            guard !out.plans.isEmpty else { print("the quarantine is empty"); return }
+            guard !out.plans.isEmpty else {
+                print("the quarantine is empty")
+                print(QuarantineCommand.describe(out.autoExpiry))
+                return
+            }
             let f = DateFormatter()
             f.dateStyle = .medium
             f.timeStyle = .short
@@ -494,9 +575,10 @@ struct QuarantineCommand: ParsableCommand {
                 }
             }
             print("\n\(ByteCount.format(out.bytes)) held in the quarantine; it's freed when the items are deleted")
-            if out.plans.contains(where: \.expired) {
+            if out.plans.contains(where: \.expired) && out.autoExpiry.active != true {
                 print("past their 7 days: `farrier plan expire` plans deleting them (Touch ID or your password)")
             }
+            print(QuarantineCommand.describe(out.autoExpiry))
         }
     }
 }
@@ -703,6 +785,11 @@ struct Uninstall: ParsableCommand {
             print("approval key: removed from the login keychain")
         } catch {
             problems.append("approval key: \(error)")
+        }
+        // The daily expiry job goes either way: without the app it would only fail.
+        if ExpirySchedule.installed {
+            ExpirySchedule.uninstall()
+            print("automatic quarantine expiry: removed")
         }
         if purge {
             let home = FileManager.default.homeDirectoryForCurrentUser

@@ -60,6 +60,29 @@ public struct FarrierContext {
     public var localSnapshots: () -> Int? = { DiskUsage.liveLocalSnapshots() }
     /// Put in front of absolute paths `disk_usage` measures (`/Applications`); tests point it at a folder.
     public var systemRoot = ""
+    /// The standing approval for automatic expiry, and what it's checked and made with.
+    public var autoExpiry: AutoExpiryStore = .default
+    /// SHA-256 (hex) of the approval key the helper has enrolled; nil if it can't be read.
+    public var enrolledKeyFingerprint: () -> String? = {
+        #if os(macOS)
+        return try? HelperClient.approvalKeyStatus().fingerprint
+        #else
+        return nil
+        #endif
+    }
+    /// Signs a payload with the approval key after the user approves on the Mac: (signature, public key).
+    public var signWithApprovalKey: (Data, String) throws -> (Data, Data) = { payload, reason in
+        #if os(macOS)
+        let r = try PlanApplier.signPolicy(payload, reason: reason)
+        return (r.signature, r.publicKey)
+        #else
+        throw OperationError("approving needs macOS and Farrier.app")
+        #endif
+    }
+    /// Installs (with the farrier executable's path) or removes the daily LaunchAgent.
+    public var installExpirySchedule: (String) throws -> Void = { try ExpirySchedule.install(executable: $0) }
+    public var uninstallExpirySchedule: () -> Void = { ExpirySchedule.uninstall() }
+    public var expiryScheduleInstalled: () -> Bool = { ExpirySchedule.installed }
     /// Asks the user on the Mac (Touch ID or password) to approve a plan this process applies itself (T3 expiry of
     /// the quarantine). Throws unless they approved. Not available on Linux.
     public var approveInProcess: (Plan) throws -> Void = { plan in
@@ -187,6 +210,19 @@ public struct QuarantineOutput: Codable {
     public let plans: [QuarantineSummary]
     /// Space the quarantine holds now (freed after expiry, not before).
     public let bytes: Int64
+    /// Whether quarantined items are deleted automatically once their 7 days are over.
+    public let autoExpiry: AutoExpiryStatus
+}
+
+public struct AutoExpiryStatus: Codable {
+    /// The user approved automatic expiry (a policy is saved).
+    public let enabled: Bool
+    /// The approval holds now (matches the enrolled key, this Mac, the retention); nil when not enabled.
+    public let active: Bool?
+    public let problem: String?
+    public let approvedAt: Int64?
+    /// The daily LaunchAgent is installed.
+    public let scheduled: Bool
 }
 
 public struct RestoreOutput: Codable {
@@ -539,6 +575,87 @@ public enum Operations {
                                 localSnapshots: ctx.localSnapshots(), now: now, root: ctx.systemRoot)
     }
 
+    // MARK: Automatic expiry
+
+    public static func autoExpiryStatus(_ ctx: FarrierContext) -> AutoExpiryStatus {
+        let scheduled = ctx.expiryScheduleInstalled()
+        guard ctx.autoExpiry.exists else {
+            return AutoExpiryStatus(enabled: false, active: nil, problem: nil, approvedAt: nil, scheduled: scheduled)
+        }
+        guard let policy = ctx.autoExpiry.load() else {
+            return AutoExpiryStatus(enabled: true, active: false, problem: "the saved approval can't be read; turn it on again",
+                                    approvedAt: nil, scheduled: scheduled)
+        }
+        let problem = policy.problem(enrolledFingerprint: ctx.enrolledKeyFingerprint(), host: ctx.host())
+        return AutoExpiryStatus(enabled: true, active: problem == nil, problem: problem, approvedAt: policy.approvedAt,
+                                scheduled: scheduled)
+    }
+
+    /// Turns automatic expiry on: the user approves on the Mac (T3, standing), the approval is saved, and the daily
+    /// LaunchAgent that runs `executable quarantine expire-due` is installed.
+    public static func enableAutoExpiry(_ ctx: FarrierContext, executable: String, now: Date = Date()) throws -> AutoExpiryStatus {
+        let days = Int(Quarantine.retention / 86_400)
+        let approvedAt = Int64(now.timeIntervalSince1970)
+        let host = ctx.host()
+        let payload = AutoExpiryPolicy.payload(retentionDays: days, approvedAt: approvedAt, host: host)
+        let (signature, publicKey): (Data, Data)
+        do {
+            (signature, publicKey) = try ctx.signWithApprovalKey(
+                payload, "turn on Farrier's automatic deletion of quarantined items once their \(days) days are over")
+        } catch {
+            try? ctx.journal.append(JournalRecord(time: approvedAt, actor: ctx.actor, planID: "auto-expiry", planHash: "",
+                                                  outcome: "notApplied", detail: "automatic expiry: \(error)"))
+            throw OperationError("\(error)")
+        }
+        try ctx.autoExpiry.save(AutoExpiryPolicy(retentionDays: days, approvedAt: approvedAt, host: host,
+                                                 publicKey: publicKey, signature: signature))
+        do { try ctx.installExpirySchedule(executable) } catch {
+            throw OperationError("approved, but the daily schedule couldn't be installed: \(error)")
+        }
+        try? ctx.journal.append(JournalRecord(time: approvedAt, actor: ctx.actor, planID: "auto-expiry", planHash: "",
+                                              outcome: "approved", detail: "automatic expiry turned on (after \(days) days, daily)"))
+        return autoExpiryStatus(ctx)
+    }
+
+    /// Turns automatic expiry off. Needs no approval: it only stops deletions.
+    public static func disableAutoExpiry(_ ctx: FarrierContext) throws -> AutoExpiryStatus {
+        try ctx.autoExpiry.remove()
+        ctx.uninstallExpirySchedule()
+        try? ctx.journal.append(JournalRecord(time: Int64(Date().timeIntervalSince1970), actor: ctx.actor, planID: "auto-expiry",
+                                              planHash: "", outcome: "removed", detail: "automatic expiry turned off"))
+        return autoExpiryStatus(ctx)
+    }
+
+    /// The scheduled run: if the standing approval holds, delete every quarantined plan past its 7 days.
+    public static func runDueExpiry(_ ctx: FarrierContext, now: Date = Date()) -> ApplyOutput {
+        let status = autoExpiryStatus(ctx)
+        guard status.enabled else { return ApplyOutput(planID: "auto-expiry", results: [], error: "automatic expiry is off") }
+        if let problem = status.problem {
+            try? ctx.journal.append(JournalRecord(time: Int64(now.timeIntervalSince1970), actor: "schedule", planID: "auto-expiry",
+                                                  planHash: "", outcome: "notApplied", detail: "automatic expiry: \(problem)"))
+            return ApplyOutput(planID: "auto-expiry", results: [], error: problem)
+        }
+        let (plan, results) = CleanupApplier.expireDue(quarantine: ctx.quarantine, host: ctx.host(), now: now)
+        guard let plan else { return ApplyOutput(planID: "auto-expiry", results: [], error: nil) }
+        let hash = (try? plan.hash().hexString) ?? ""
+        _ = try? ctx.plans.save(plan)
+        func journal(_ outcome: String, ruleID: String? = nil, detail: String) {
+            try? ctx.journal.append(JournalRecord(time: Int64(now.timeIntervalSince1970), actor: "schedule", planID: plan.id,
+                                                  planHash: hash, ruleID: ruleID,
+                                                  action: ruleID == nil ? nil : RemediationCatalog.quarantineExpire.id,
+                                                  outcome: outcome, detail: detail))
+        }
+        journal("planned", detail: "automatic expiry: \(plan.items.count) quarantined plan(s), under the approval of "
+                + "\(status.approvedAt.map { String($0) } ?? "?")")
+        let items = results.map { r in
+            ItemResult(ruleID: r.ruleID, action: RemediationCatalog.quarantineExpire.id,
+                       outcome: r.outcome == .applied ? .applied : r.outcome == .refused ? .refused : .failed,
+                       detail: "\(r.path): \(r.detail)")
+        }
+        for r in items { journal(r.outcome.rawValue, ruleID: r.ruleID, detail: r.detail ?? "") }
+        return ApplyOutput(planID: plan.id, results: items, error: nil)
+    }
+
     public static func quarantineList(_ ctx: FarrierContext, details: Bool = false, now: Date = Date()) -> QuarantineOutput {
         let t = Int64(now.timeIntervalSince1970)
         // Fully restored plans hold nothing; their manifests stay, as a record, but aren't listed.
@@ -548,7 +665,7 @@ public enum Operations {
                               restored: m.items.filter { $0.state == .restored }.count,
                               bytes: m.quarantinedBytes, path: ctx.quarantine.folder(m.planID), items: details ? m.items : nil)
         }
-        return QuarantineOutput(plans: plans, bytes: plans.reduce(0) { $0 + $1.bytes })
+        return QuarantineOutput(plans: plans, bytes: plans.reduce(0) { $0 + $1.bytes }, autoExpiry: autoExpiryStatus(ctx))
     }
 
     /// Puts a cleanup plan's items back (all, or only the given original paths). T2, no approval.
