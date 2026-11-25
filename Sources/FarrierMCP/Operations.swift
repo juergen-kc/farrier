@@ -55,6 +55,9 @@ public struct FarrierContext {
     public var cleanupScanner: () -> CleanupScanner = { CleanupScanner() }
     /// Where cleanup plans move items to.
     public var quarantine: Quarantine = .default
+    /// The volume holding a path, and the number of APFS local snapshots (for `disk_usage`).
+    public var volumeUsage: (String) -> VolumeUsage? = { VolumeUsage.live($0) }
+    public var localSnapshots: () -> Int? = { DiskUsage.liveLocalSnapshots() }
     /// Asks the user on the Mac (Touch ID or password) to approve a plan this process applies itself (T3 expiry of
     /// the quarantine). Throws unless they approved. Not available on Linux.
     public var approveInProcess: (Plan) throws -> Void = { plan in
@@ -524,6 +527,14 @@ public enum Operations {
             journal("notApplied", detail: "\(error)")
             return ApplyOutput(planID: plan.id, results: [], error: "\(error)")
         }
+    }
+
+    /// Read-only: how the disk is used, and what Farrier can free and when.
+    public static func diskUsage(_ ctx: FarrierContext, now: Date = Date()) throws -> DiskUsageReport {
+        let scan = try cleanupScan(ctx)
+        let home = ctx.cleanupScanner().home
+        return DiskUsage.report(home: home, scan: scan, quarantine: ctx.quarantine.list(), volume: ctx.volumeUsage(home),
+                                localSnapshots: ctx.localSnapshots(), now: now)
     }
 
     public static func quarantineList(_ ctx: FarrierContext, details: Bool = false, now: Date = Date()) -> QuarantineOutput {

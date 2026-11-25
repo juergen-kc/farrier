@@ -2,7 +2,7 @@
 
 > Status: design draft. Names and schemas may change before v0.1. **Implemented so far** (`farrier mcp`):
 > `farrier_status`, `facts_collect`, `posture_check`, `posture_explain`, `posture_plan_remediation`, `plan_show`,
-> `apply_plan`, `plan_undo`, `inventory`, `cleanup_scan`, `cleanup_plan`, `quarantine_list`, `quarantine_restore`, `quarantine_plan_expiry`, `journal_recent`, `exceptions_list`, `posture_plan_exception`, and the `security-checkup`
+> `apply_plan`, `plan_undo`, `inventory`, `cleanup_scan`, `disk_usage`, `cleanup_plan`, `quarantine_list`, `quarantine_restore`, `quarantine_plan_expiry`, `journal_recent`, `exceptions_list`, `posture_plan_exception`, and the `security-checkup`
 > prompt.
 > `farrier_status`, `facts_collect`, `journal_recent`, `cleanup_scan` and the two exception tools are additions to this catalog.
 
@@ -40,7 +40,7 @@ with on-device approval for T3 and T4.
 | Tool | Tier | Description |
 |---|---|---|
 | `cleanup_scan` | T0 | Implemented. What the cleanup rules match in the user's home folder (caches, old logs, Homebrew downloads, package manager caches, Xcode data), with size, days since last use, whether it's regenerable and the rule's evidence, or why a rule was skipped (an app is running). Arguments: `ruleIDs`, `minAge`. Nothing is moved. |
-| `disk_usage` | T0 | Summarize disk use by category: caches, developer, apps, user data, APFS snapshots, purgeable. |
+| `disk_usage` | T0 | Implemented. The volume's size, free space and purgeable space (macOS); the space taken by caches, logs, Xcode, simulators, package manager caches, the Trash, apps and the quarantine (a category marked `incomplete` couldn't be read fully); the number of APFS local snapshots; and what Farrier can free **now** (quarantine past its 7 days), **after expiry** (the rest of the quarantine) and **after a cleanup** (what the rules match). Personal folders (Documents, Desktop, Downloads, …) aren't measured: macOS asks before an app reads them. |
 | `cleanup_plan` | T0 | Implemented. Plan moving cleanup candidates into the quarantine: all, or only `paths`; options `ruleIDs`, `minAge`. Each item has its path, size, days since last use, whether it's regenerable, and a fingerprint (device, inode, change time) to recognise it when applied. At most 500 items per plan. |
 | `app_uninstall_plan` | T0 | Plan a full app removal: the bundle, containers, preferences, launchd jobs, receipts. |
 | `large_files` | T0 | Find large or old files the user created. Report only; these files are never planned for removal. |
@@ -112,6 +112,8 @@ Mac is data, and nothing is applied unless the user asks):
   they go, and that they only know Farrier's own changes).
 - `undo-a-change` (argument `plan`, optional; only a plan id or prefix is accepted): plan putting a change back.
 - `management-overview`: MDM enrollment, profiles, and which settings they control.
+- `free-up-space`: disk usage, what the cleanup rules match, and when space actually comes back (the quarantine frees
+  nothing until it's emptied); plans a cleanup only for what the user picks.
 
-Planned, when their tools exist: `why-did-it-wake`, `why-is-it-slow`, `free-up-space`, `what-changed` (snapshots),
+Planned, when their tools exist: `why-did-it-wake`, `why-is-it-slow`, `what-changed` (snapshots),
 `prepare-for-handover` (posture, cleanup, and inventory export before giving a Mac to someone else).
