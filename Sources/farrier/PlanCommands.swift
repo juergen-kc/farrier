@@ -64,7 +64,7 @@ struct PlanCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "plan",
         abstract: "Make and inspect plans. Nothing changes until `farrier apply`.",
-        subcommands: [PlanPosture.self, PlanCleanup.self, PlanShow.self, PlanList.self]
+        subcommands: [PlanPosture.self, PlanCleanup.self, PlanExpire.self, PlanShow.self, PlanList.self]
     )
 }
 
@@ -160,6 +160,46 @@ struct PlanCleanup: ParsableCommand {
     }
 }
 
+struct PlanExpire: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "expire",
+        abstract: "Plan deleting quarantined items for good, to free their space.",
+        discussion: """
+        By default, every cleanup plan whose 7 days are over; with --plan, the plans you name, also before then. \
+        It can't be undone, so applying it asks for Touch ID or your password (T3).
+        """
+    )
+
+    @Option(name: .customLong("plan"), help: "Only this cleanup plan's quarantine (id or prefix, repeatable; see `farrier quarantine list`).")
+    var plans: [String] = []
+
+    @Flag(help: "Output JSON.")
+    var json = false
+
+    @OptionGroup var redaction: RedactOption
+
+    func run() throws {
+        redaction.apply()
+        let out: PlanOutput
+        do {
+            out = try Operations.planExpiry(FarrierContext.live(actor: "cli"), ids: plans.isEmpty ? nil : plans)
+        } catch let error as OperationError {
+            note("\(error)")
+            throw ExitCode(2)
+        }
+        if json {
+            try Output.json(out)
+            return
+        }
+        if let plan = out.plan { printPlan(plan) } else { print(out.next) }
+        if !out.skipped.isEmpty {
+            print("left out:")
+            for s in out.skipped { print("  \(s.reason)") }
+        }
+        if let plan = out.plan { print("\nreview it, then run: farrier apply \(plan.id.prefix(8))") }
+    }
+}
+
 struct Undo: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Plan undoing what an applied plan changed. Nothing changes until `farrier apply`.",
@@ -221,6 +261,24 @@ func printPlan(_ plan: Plan) {
         }
         print("moves \(plan.items.count) item(s), \(ByteCount.format(total)), into Farrier's quarantine; "
               + "`farrier restore` puts them back for \(Quarantine.retention / 86_400) days")
+        return
+    }
+    if plan.items.allSatisfy({ $0.action == RemediationCatalog.quarantineExpire.id }) {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        var total: Int64 = 0
+        for item in plan.items {
+            let o = item.observed.object ?? [:]
+            let bytes = Int64(o["bytes"]?.number ?? 0)
+            total += bytes
+            let due = Date(timeIntervalSince1970: TimeInterval(o["expiresAt"]?.number ?? 0))
+            let when = o["due"] == .bool(true) ? "kept until \(f.string(from: due))" : "early: would be kept until \(f.string(from: due))"
+            print("  [T3] \(item.description)")
+            print("        \(Int(o["items"]?.number ?? 0)) item(s), \(ByteCount.format(bytes)); \(when)")
+        }
+        print("deletes \(ByteCount.format(total)) for good: it can't be undone")
+        print("applying it asks for Touch ID or your password on this Mac")
         return
     }
     for item in plan.items {
@@ -428,14 +486,17 @@ struct QuarantineCommand: ParsableCommand {
             f.timeStyle = .short
             for p in out.plans {
                 let when = f.string(from: Date(timeIntervalSince1970: TimeInterval(p.expiresAt)))
-                let expiry = p.expired ? "expired \(when), can still be restored" : "kept until \(when)"
+                let expiry = p.expired ? "its 7 days ended \(when): restorable until it's deleted" : "kept until \(when)"
                 let restored = p.restored > 0 ? ", \(p.restored) restored" : ""
                 print("\(p.planID.prefix(8))  \(ByteCount.format(p.bytes).padding(toLength: 9, withPad: " ", startingAt: 0)) \(p.quarantined) item(s)\(restored), \(expiry)")
                 for item in p.items ?? [] where items {
                     print("    \(item.state == .restored ? "restored" : "        ")  \(shortPath(item.original))")
                 }
             }
-            print("\n\(ByteCount.format(out.bytes)) held in the quarantine; it's freed when the quarantine expires")
+            print("\n\(ByteCount.format(out.bytes)) held in the quarantine; it's freed when the items are deleted")
+            if out.plans.contains(where: \.expired) {
+                print("past their 7 days: `farrier plan expire` plans deleting them (Touch ID or your password)")
+            }
         }
     }
 }

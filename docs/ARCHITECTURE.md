@@ -356,7 +356,12 @@ Root-owned items go to the helper together with the proof.
   Anything else is refused and left in place. `~/Library/Application Support/Farrier` is a protected path itself.
 - `farrier restore <plan>` (MCP `quarantine_restore`) moves items back; one whose original path is taken again
   stays in the quarantine. `farrier undo` on a cleanup plan points to `restore`.
-- The default retention is 7 days. Expiring quarantine is itself a T3 operation. The scheduled
+- The default retention is 7 days. Expiring quarantine is itself a T3 operation: `farrier plan expire` (MCP
+  `quarantine_plan_expiry`) plans it, for every plan past its 7 days or the plans named. It's applied in-process
+  (the items are the user's), after the same approval as a T4 plan: the same key checks (access list intact, enrolled
+  with the helper, not past its rotation date) and a Touch ID or password prompt naming the plan. Each item must
+  still hold the number of items and bytes it was planned with; deletion never follows symlinks and makes read-only
+  folders writable first. Deleted items stay in the manifest as `deleted`. The scheduled
   expiry runs as a T3 plan that the user pre-approved when changing the setting.
 - Disk space is not actually freed until the retention window expires. Reports show **reclaimable
   now** and **reclaimable after expiry** separately, so nobody is misled.

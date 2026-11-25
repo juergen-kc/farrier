@@ -46,6 +46,10 @@ public struct PlanItem: Codable, Sendable, Equatable {
             guard let p = try? CleanupItemRules.validate(parameters) else { return action.summary }
             return "\(action.summary): \(p.path)"
         }
+        if action.id == RemediationCatalog.quarantineExpire.id {
+            guard let planID = try? QuarantineExpiryRules.validate(parameters) else { return action.summary }
+            return "\(action.summary): what cleanup plan \(planID.prefix(8)) moved there"
+        }
         guard action.takesParameters, let p = try? ExceptionRules.validate(ruleID: ruleID, parameters,
                                                                             requireReason: action.id == RemediationCatalog.exceptionAdd.id) else {
             return action.summary
@@ -120,6 +124,8 @@ public struct Plan: Codable, Sendable, Equatable {
                 _ = try UndoRules.validate(item.parameters)
             } else if action.id == RemediationCatalog.cleanupQuarantine.id {
                 _ = try CleanupItemRules.validate(item.parameters)
+            } else if action.id == RemediationCatalog.quarantineExpire.id {
+                _ = try QuarantineExpiryRules.validate(item.parameters)
             } else if action.takesParameters {
                 _ = try ExceptionRules.validate(ruleID: item.ruleID, item.parameters,
                                                 requireReason: action.id == RemediationCatalog.exceptionAdd.id)
@@ -163,7 +169,7 @@ public struct RemediationAction: Sendable, Equatable {
     public var reverses: String? = nil
     /// Exceptions carry their scope as parameters, undo actions the plan they reverse; everything else is fully
     /// described by the action.
-    public var takesParameters: Bool { id.hasPrefix("exception.") || id.hasPrefix("cleanup.") || reverses != nil }
+    public var takesParameters: Bool { id.hasPrefix("exception.") || id.hasPrefix("cleanup.") || id.hasPrefix("quarantine.") || reverses != nil }
 }
 
 public enum RemediationCatalog {
@@ -233,8 +239,15 @@ public enum RemediationCatalog {
         managedDeclarationTypes: [], managedPreference: nil, summary: "Move to Farrier's quarantine"
     )
 
+    /// Deletes for good what one cleanup plan moved into the quarantine. T3: it can't be undone, so the user approves
+    /// it on the Mac. Applied in-process (the items are the user's own), after the same approval as T4.
+    public static let quarantineExpire = RemediationAction(
+        id: "quarantine.expire", tier: .t3, fact: "quarantine.plans", compliantValues: [], managedPayloadTypes: [],
+        managedDeclarationTypes: [], managedPreference: nil, summary: "Delete for good"
+    )
+
     public static let all: [RemediationAction] = [firewallEnable, firewallStealthEnable, gatekeeperEnable, securityAutoInstall,
-                                                  exceptionAdd, exceptionRemove, cleanupQuarantine,
+                                                  exceptionAdd, exceptionRemove, cleanupQuarantine, quarantineExpire,
                                                   firewallRestore, firewallStealthRestore, securityAutoInstallRestore]
 
     /// The undo action for `actionID`, if Farrier can undo it.
@@ -251,6 +264,8 @@ public enum RemediationCatalog {
             return "accept it again with `farrier exceptions add`"
         case cleanupQuarantine.id:
             return "put it back from the quarantine with `farrier restore`"
+        case quarantineExpire.id:
+            return "the items were deleted for good; there is no undo"
         default:
             return "Farrier can't undo `\(actionID)`"
         }

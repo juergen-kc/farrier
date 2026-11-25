@@ -171,12 +171,10 @@ public enum PlanApplier {
         return "apply Farrier plan \(plan.shortHash()) (\(plan.tier.rawValue)): \(what)"
     }
 
-    /// Checks the key, gets a nonce, asks the user (Touch ID or password), and hands the plan to the helper.
-    public static func apply(_ plan: Plan, now: Date = Date()) throws -> ApplyReply {
-        guard Int64(now.timeIntervalSince1970) < plan.expiresAt else { throw PlanApplyError.expired }
-        guard plan.host == HostIdentity.hardwareUUID() else { throw PlanApplyError.otherHost }
-        guard plan.tier.needsApproval else { throw PlanApplyError.notReady("only plans that need approval (T3/T4) go to the helper") }
-
+    /// What every approval needs first: a current helper, and an approval key on this account whose access list is
+    /// intact and which the helper has enrolled. Returns when the key was enrolled.
+    @discardableResult
+    static func checkApprovalKey() throws -> Int64? {
         try HelperClient.ensureCurrent()
         let status = try HelperClient.approvalKeyStatus()
         if let error = status.error { throw PlanApplyError.notReady(error) }
@@ -192,6 +190,42 @@ public enum PlanApplier {
         guard status.fingerprint == FarrierCrypto.sha256(try ApprovalKey.publicKey()).hexString else {
             throw PlanApplyError.notReady("the helper has a different approval key enrolled; run `farrier setup`")
         }
+        return status.enrolledAt
+    }
+
+    /// Approves a plan whose items this process applies itself (T3 expiry of the user's own quarantine): the same
+    /// key checks and the same prompt as a helper plan, and a key past its rotation date is refused, as the helper
+    /// refuses it for its own plans. Returns only if the user approved on the Mac.
+    public static func approveInProcess(_ plan: Plan, now: Date = Date()) throws {
+        let t = Int64(now.timeIntervalSince1970)
+        guard t < plan.expiresAt else { throw PlanApplyError.expired }
+        guard plan.host == HostIdentity.hardwareUUID() else { throw PlanApplyError.otherHost }
+        let enrolledAt = try checkApprovalKey()
+        if let enrolledAt, case .expired(let days) = ApprovalKeyPolicy.age(enrolledAt: enrolledAt, now: t) {
+            throw PlanApplyError.notReady(ApprovalKeyPolicy.expiredMessage(days: days))
+        }
+        let data = try plan.canonicalData()
+        _ = try Plan.decodeCanonical(data)
+        let payload = ApprovalPayload.build(planHash: FarrierCrypto.sha256(data), nonce: FarrierCrypto.randomBytes(32),
+                                            expiresAt: t + ApprovalBook.defaultTTL)
+        let signature: Data
+        do {
+            signature = try ApprovalKey.sign(payload, reason: promptReason(for: plan))
+        } catch let error as LAError where [.userCancel, .appCancel, .systemCancel].contains(error.code) {
+            throw PlanApplyError.notReady("the approval prompt was cancelled; nothing changed")
+        }
+        guard FarrierCrypto.isValidSignature(signature, for: payload, publicKeyDER: try ApprovalKey.publicKey()) else {
+            throw PlanApplyError.refused("the approval signature didn't verify")
+        }
+    }
+
+    /// Checks the key, gets a nonce, asks the user (Touch ID or password), and hands the plan to the helper.
+    public static func apply(_ plan: Plan, now: Date = Date()) throws -> ApplyReply {
+        guard Int64(now.timeIntervalSince1970) < plan.expiresAt else { throw PlanApplyError.expired }
+        guard plan.host == HostIdentity.hardwareUUID() else { throw PlanApplyError.otherHost }
+        guard plan.tier.needsApproval else { throw PlanApplyError.notReady("only plans that need approval (T3/T4) go to the helper") }
+
+        try checkApprovalKey()
 
         let data = try plan.canonicalData()
         _ = try Plan.decodeCanonical(data)  // the same checks the helper makes, before anything is shown or signed
