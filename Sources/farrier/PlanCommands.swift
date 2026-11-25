@@ -46,6 +46,11 @@ struct Setup: ParsableCommand {
                 ready += " (replaced every \(ApprovalKeyPolicy.maxAgeDays) days: run `farrier setup` again before \(f.string(from: next)))"
             }
             print(ready)
+            // Automatic expiry was approved with a key; a new key means approving it again.
+            let auto = Operations.autoExpiryStatus(FarrierContext.live(actor: "cli"))
+            if auto.enabled, let problem = auto.problem {
+                print("automatic quarantine deletion is paused: \(problem)")
+            }
             // Not part of the key, but the last step of onboarding: say if it's missing, and how to fix it.
             if case .success(false)? = try? HelperClient.fullDiskAccess() {
                 print("next: give Farrier.app Full Disk Access, for the checks that read privacy-protected data: `farrier helper full-disk-access`")

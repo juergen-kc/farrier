@@ -645,8 +645,8 @@ public enum Operations {
                                                   action: ruleID == nil ? nil : RemediationCatalog.quarantineExpire.id,
                                                   outcome: outcome, detail: detail))
         }
-        journal("planned", detail: "automatic expiry: \(plan.items.count) quarantined plan(s), under the approval of "
-                + "\(status.approvedAt.map { String($0) } ?? "?")")
+        let approved = status.approvedAt.map { ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: TimeInterval($0))) } ?? "?"
+        journal("planned", detail: "automatic expiry: \(plan.items.count) quarantined plan(s), under the approval of \(approved)")
         let items = results.map { r in
             ItemResult(ruleID: r.ruleID, action: RemediationCatalog.quarantineExpire.id,
                        outcome: r.outcome == .applied ? .applied : r.outcome == .refused ? .refused : .failed,
