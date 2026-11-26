@@ -91,6 +91,8 @@ public enum ToolProgress {
         case "apply_plan": what = "waiting for the user to approve on the Mac (Touch ID or password), then applying"
         case "inventory": what = "collecting the inventory (apps and their signatures)"
         case "snapshot_create", "snapshot_diff": what = "collecting the inventory and settings"
+        case "log_query": what = "searching the unified log"
+        case "power_history": what = "reading the power management log"
         case "cleanup_scan": what = "measuring caches and logs"
         case "disk_usage": what = "measuring caches, developer data and apps"
         case "cleanup_plan": what = "measuring caches and logs, then planning"

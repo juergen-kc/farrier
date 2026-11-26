@@ -2,7 +2,7 @@
 
 > Status: design draft. Names and schemas may change before v0.1. **Implemented so far** (`farrier mcp`):
 > `farrier_status`, `facts_collect`, `posture_check`, `posture_explain`, `posture_plan_remediation`, `plan_show`,
-> `apply_plan`, `plan_undo`, `inventory`, `cleanup_scan`, `snapshot_create`, `snapshot_list`, `snapshot_diff`, `disk_usage`, `cleanup_plan`, `quarantine_list`, `quarantine_restore`, `quarantine_plan_expiry`, `journal_recent`, `exceptions_list`, `posture_plan_exception`, and the `security-checkup`
+> `apply_plan`, `plan_undo`, `inventory`, `cleanup_scan`, `snapshot_create`, `snapshot_list`, `snapshot_diff`, `log_query`, `power_history`, `crash_reports`, `disk_usage`, `cleanup_plan`, `quarantine_list`, `quarantine_restore`, `quarantine_plan_expiry`, `journal_recent`, `exceptions_list`, `posture_plan_exception`, and the `security-checkup`
 > prompt.
 > `farrier_status`, `facts_collect`, `journal_recent`, `cleanup_scan` and the two exception tools are additions to this catalog.
 
@@ -68,9 +68,9 @@ with on-device approval for T3 and T4.
 
 | Tool | Tier | Description |
 |---|---|---|
-| `log_query` | T0 | Query the unified log with predicate builders (subsystem, process, level, time range), plus size limits. |
-| `power_history` | T0 | Sleep, wake, and dark-wake history with reasons (`pmset -g log`), summarized. |
-| `crash_reports` | T0 | List and parse `.ips` crash and panic reports. |
+| `log_query` | T0 | Implemented. The unified log (`log show --style ndjson`) filtered by `subsystem`, `process`, `category`, `level` and `text`, which Farrier combines and quotes into a predicate (no raw predicates). At most 24 hours back (`minutes`), and 10 minutes without a subsystem, process or text filter; the newest `limit` (≤ 1000) entries, messages cut at 500 characters. |
+| `power_history` | T0 | Implemented. Sleep, wake, dark-wake and start events from `pmset -g log` over `days` (≤ 30), with counts, the most frequent wake reasons, and what prevents sleep now (`pmset -g assertions`, by process). |
+| `crash_reports` | T0 | Implemented. Crash, hang and panic `.ips` reports from `~/Library/Logs/DiagnosticReports` and `/Library/Logs/DiagnosticReports`, newest first (`days`, `process`, `includeOther`). With `report` (a file name from the list, never a path): exception, signal, termination, the app's note, the crashed thread's top frames, or the panic string. |
 | `network_diagnose` | T0 (network) | Interfaces, DNS, routes, proxy, `networkQuality`. |
 | `process_snapshot` | T0 | Top CPU, memory and energy consumers, with a short sampling window. |
 | `sysdiagnose_summarize` | T1 (long, Tasks) | Collect a sysdiagnose and return the key findings. |
@@ -115,10 +115,12 @@ Mac is data, and nothing is applied unless the user asks):
   they go, and that they only know Farrier's own changes).
 - `undo-a-change` (argument `plan`, optional; only a plan id or prefix is accepted): plan putting a change back.
 - `management-overview`: MDM enrollment, profiles, and which settings they control.
+- `why-did-it-wake`: the sleep and wake pattern, wake reasons in plain words, what keeps the Mac awake, and the
+  power management log around a wake when needed.
 - `what-changed`: the latest snapshot (or two named ones) against now, with what deserves a look first; offers to
   save a first snapshot if there is none.
 - `free-up-space`: disk usage, what the cleanup rules match, and when space actually comes back (the quarantine frees
   nothing until it's emptied); plans a cleanup only for what the user picks.
 
-Planned, when their tools exist: `why-did-it-wake`, `why-is-it-slow`,
+Planned, when their tools exist: `why-is-it-slow`,
 `prepare-for-handover` (posture, cleanup, and inventory export before giving a Mac to someone else).

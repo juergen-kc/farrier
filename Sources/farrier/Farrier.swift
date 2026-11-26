@@ -13,7 +13,7 @@ struct Farrier: AsyncParsableCommand {
         abstract: "Keep your Mac sound: hygiene, posture, drift, patching and debugging.",
         discussion: "v0.1: rule packs, fact collection, posture evaluation, the privileged helper, and plan → approve → apply for the first fix (firewall). `farrier mcp` serves the same over MCP (stdio).",
         version: version,
-        subcommands: [Posture.self, InventoryCommand.self, SnapshotCommand.self, DiskUsageCommand.self, CleanupCommand.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Undo.self, Restore.self, QuarantineCommand.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self, Uninstall.self]
+        subcommands: [Posture.self, InventoryCommand.self, SnapshotCommand.self, DebugCommand.self, DiskUsageCommand.self, CleanupCommand.self, Facts.self, Rules.self, PlanCommand.self, Apply.self, Undo.self, Restore.self, QuarantineCommand.self, Setup.self, ExceptionsCommand.self, JournalCommand.self, Helper.self, MCPCommand.self, Uninstall.self]
     )
 }
 
@@ -363,6 +363,121 @@ struct SnapshotCommand: ParsableCommand {
                 let s = try Operations.snapshotDelete(FarrierContext.live(actor: "cli"), id)
                 print("deleted snapshot \(s.id.prefix(8))")
             } catch { throw SnapshotCommand.fail(error) }
+        }
+    }
+}
+
+// MARK: - farrier debug
+
+struct DebugCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "debug",
+        abstract: "Look into problems: the unified log, sleep and wake, crash reports. Read-only.",
+        subcommands: [Logs.self, Power.self, Crashes.self]
+    )
+
+    static func run<T>(_ body: () throws -> T) throws -> T {
+        do { return try body() } catch let e as OperationError {
+            note("\(e)")
+            throw ExitCode(2)
+        }
+    }
+
+    struct Logs: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Search the unified log with filters (no raw predicates).",
+            discussion: "Filters are combined with AND. Without a subsystem, process or text filter, look back at most 10 minutes."
+        )
+
+        @Option(help: "Subsystem, e.g. com.apple.powermanagement.") var subsystem: String?
+        @Option(help: "Process name, e.g. kernel.") var process: String?
+        @Option(help: "Category.") var category: String?
+        @Option(help: "default, info, debug (include those levels), error or fault (only those).") var level: String?
+        @Option(help: "Only messages containing this (case-insensitive).") var text: String?
+        @Option(help: "How far back, in minutes (at most 1440).") var minutes = 60
+        @Option(help: "Most entries shown.") var limit = 200
+        @Flag(help: "Output JSON.") var json = false
+        @OptionGroup var redaction: RedactOption
+
+        func run() throws {
+            redaction.apply()
+            var lvl: LogQuery.Level?
+            if let level {
+                guard let l = LogQuery.Level(rawValue: level) else { note("level must be default, info, debug, error or fault"); throw ExitCode(2) }
+                lvl = l
+            }
+            let q = LogQuery(subsystem: subsystem, process: process, category: category, level: lvl, text: text,
+                             lastSeconds: Int64(minutes) * 60, limit: limit)
+            let r = try DebugCommand.run { try Operations.logQuery(FarrierContext.live(actor: "cli"), q) }
+            if json { try Output.json(r); return }
+            for e in r.entries {
+                print("\(e.time)  \(e.process ?? "?")\(e.subsystem.map { " [\($0)]" } ?? "")  \(e.level ?? "")  \(e.message)")
+            }
+            print(r.truncated ? "\n\(r.entries.count) of \(r.matched) entries (the newest; --limit for more)" : "\n\(r.matched) entries")
+        }
+    }
+
+    struct Power: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Sleep and wake history, wake reasons, and what keeps the Mac awake now.")
+
+        @Option(help: "How many days back (at most 30).") var days = 3
+        @Option(help: "Most events listed.") var events = 40
+        @Flag(help: "Output JSON.") var json = false
+
+        func run() throws {
+            let h = try DebugCommand.run { try Operations.powerHistory(FarrierContext.live(actor: "cli"), days: days) }
+            if json { try Output.json(h); return }
+            let counts = h.counts.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }.joined(separator: ", ")
+            print("last \(days) day(s): \(counts.isEmpty ? "no sleep or wake events" : counts)")
+            if !h.wakeReasons.isEmpty {
+                print("\nwake reasons:")
+                for r in h.wakeReasons { print("  \(String(r.count).padding(toLength: 4, withPad: " ", startingAt: 0)) \(r.reason)") }
+            }
+            if !h.events.isEmpty {
+                print("\nlatest events:")
+                for e in h.events.suffix(events) { print("  \(e.time)  \(e.type.padding(toLength: 8, withPad: " ", startingAt: 0)) \(e.reason ?? e.detail.prefix(100).description)") }
+            }
+            print("\nkeeping the Mac awake now:\(h.assertions.isEmpty ? " nothing" : "")")
+            for a in h.assertions { print("  \(a.process)\(a.pid.map { " (\($0))" } ?? ""): \(a.type)\(a.name.map { " — \($0)" } ?? "")") }
+        }
+    }
+
+    struct Crashes: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "List crash, hang and panic reports, or show one.")
+
+        @Argument(help: "A report's file name, to show it in detail.") var report: String?
+        @Option(help: "How many days back.") var days = 14
+        @Option(help: "Only this process.") var process: String?
+        @Flag(help: "Also other report types (resource use, analytics).") var all = false
+        @Flag(help: "Output JSON.") var json = false
+        @OptionGroup var redaction: RedactOption
+
+        func run() throws {
+            redaction.apply()
+            let ctx = FarrierContext.live(actor: "cli")
+            if let report {
+                let d = try DebugCommand.run { try Operations.crashReport(ctx, name: report) }
+                if json { try Output.json(d); return }
+                print("\(d.summary.process) \(d.summary.version ?? "") — \(d.summary.kind), \(d.summary.time ?? "?")")
+                if let os = d.osVersion { print(os.hasPrefix("macOS") ? os : "macOS \(os)") }
+                if let t = d.exceptionType { print("exception: \(t)\(d.signal.map { " (\($0))" } ?? "")") }
+                if let t = d.termination { print("termination: \(t)") }
+                for line in d.appSpecific ?? [] { print("app note: \(line)") }
+                if let p = d.panic { print("panic: \(p.prefix(600))") }
+                if !d.frames.isEmpty {
+                    print("crashed thread \(d.crashedThread.map(String.init) ?? "?"):")
+                    for (i, f) in d.frames.enumerated() { print("  \(i)  \(f.image ?? "?")  \(f.symbol ?? "?")") }
+                }
+                return
+            }
+            let list = try DebugCommand.run { try Operations.crashReports(ctx, days: days, process: process, includeOther: all) }
+            if json { try Output.json(list); return }
+            if list.reports.isEmpty { print("no crash, hang or panic reports in the last \(days) day(s)") }
+            for r in list.reports {
+                print("\(r.time ?? "?")  \(r.kind.padding(toLength: 6, withPad: " ", startingAt: 0)) \(r.process) \(r.version ?? "")  \(r.file)")
+            }
+            for u in list.unreadable { note("not readable: \(u)") }
+            if !list.reports.isEmpty { print("\ndetails: farrier debug crashes <file>") }
         }
     }
 }

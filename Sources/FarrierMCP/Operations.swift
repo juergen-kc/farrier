@@ -60,6 +60,10 @@ public struct FarrierContext {
     public var localSnapshots: () -> Int? = { DiskUsage.liveLocalSnapshots() }
     /// Put in front of absolute paths `disk_usage` measures (`/Applications`); tests point it at a folder.
     public var systemRoot = ""
+    /// Runs the debugging tools' commands (log, pmset); tests replay recorded output.
+    public var debugRunner: CommandRunning = ProcessRunner()
+    /// The home folder whose DiagnosticReports `crash_reports` reads (with /Library/Logs/DiagnosticReports).
+    public var crashHome: String = FileManager.default.homeDirectoryForCurrentUser.path
     /// Saved snapshots of the inventory and settings.
     public var snapshots: SnapshotStore = .default
     /// The privileged helper's scan of system locations, and its root-only quarantine.
@@ -444,6 +448,30 @@ public enum Operations {
         }
         let collected = ctx.collectFacts().merging(ctx.collectInventory())
         return Inventory.build(facts: collected.facts, notes: collected.notes, only: sections, flaggedOnly: flaggedOnly)
+    }
+
+    // MARK: Debugging (read-only)
+
+    public static func logQuery(_ ctx: FarrierContext, _ q: LogQuery) throws -> LogQueryResult {
+        do { return try LogParser.run(q, runner: ctx.debugRunner) } catch let e as PlanError { throw OperationError(e.description) }
+    }
+
+    public static func powerHistory(_ ctx: FarrierContext, days: Int = 3, now: Date = Date()) throws -> PowerHistory {
+        do { return try PowerParser.run(days: days, runner: ctx.debugRunner, now: now) } catch let e as PlanError {
+            throw OperationError(e.description)
+        }
+    }
+
+    public static func crashReports(_ ctx: FarrierContext, days: Int = 14, process: String? = nil, includeOther: Bool = false,
+                                    limit: Int = 50, now: Date = Date()) throws -> CrashReportList {
+        guard days >= 1, days <= 365 else { throw OperationError("`days` must be between 1 and 365") }
+        guard limit >= 1, limit <= 500 else { throw OperationError("`limit` must be between 1 and 500") }
+        return CrashReports.list(home: ctx.crashHome, since: now.addingTimeInterval(-Double(days) * 86_400), process: process,
+                                 includeOther: includeOther, limit: limit)
+    }
+
+    public static func crashReport(_ ctx: FarrierContext, name: String) throws -> CrashReportDetail {
+        do { return try CrashReports.detail(home: ctx.crashHome, name: name) } catch let e as PlanError { throw OperationError(e.description) }
     }
 
     // MARK: Snapshots
