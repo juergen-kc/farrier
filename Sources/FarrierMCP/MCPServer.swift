@@ -216,6 +216,26 @@ public enum ToolCatalog {
                  "report": ["type": "string", "description": "A report's file name, to read it in detail"],
              ]),
              annotations: readOnly("Crash reports")),
+        Tool(name: "process_snapshot", title: "What's using the Mac",
+             description: "Read-only: CPU, memory and energy use right now, from two `top` samples `seconds` apart (default "
+                 + "2): CPU user/system/idle, load averages, memory used, wired and compressed, swap, and the top `count` "
+                 + "processes by CPU, by memory and by energy impact. Command names only, never arguments.",
+             inputSchema: schema([
+                 "seconds": ["type": "integer", "description": "Sampling interval, 1 to 10 (default 2)"],
+                 "count": ["type": "integer", "description": "Processes per list, 1 to 50 (default 10)"],
+             ]),
+             annotations: readOnly("What's using the Mac")),
+        Tool(name: "network_diagnose", title: "Diagnose the network",
+             description: "Read-only: the default route and primary interface (addresses, status), DNS resolvers and search "
+                 + "domains, HTTP/HTTPS/SOCKS proxies and PAC, then timed checks: a DNS lookup and an HTTPS (TCP 443) connect "
+                 + "to `host` (default apple.com). With `quality`, also `networkQuality` (about 20 seconds; download, upload, "
+                 + "responsiveness). The checks reach the network; nothing is changed.",
+             inputSchema: schema([
+                 "host": ["type": "string", "description": "Hostname to check (default apple.com)"],
+                 "quality": ["type": "boolean", "description": "Also run networkQuality (slow)"],
+             ]),
+             annotations: .init(title: "Diagnose the network", readOnlyHint: true, destructiveHint: false,
+                                idempotentHint: true, openWorldHint: true)),
         Tool(name: "posture_check", title: "Check posture",
              description: "Evaluate the posture rules against this Mac. Each finding has a status (pass, fail, unknown), "
                  + "severity, and the flags managed (an MDM profile, declaration or managed preference owns the setting; "
@@ -361,6 +381,12 @@ public enum ToolCatalog {
                 return try result(Operations.crashReports(ctx, days: try optionalInt(args, "days") ?? 14,
                                                           process: try optionalString(args, "process"),
                                                           includeOther: try optionalBool(args, "includeOther") ?? false))
+            case "process_snapshot":
+                return try result(Operations.processSnapshot(ctx, seconds: try optionalInt(args, "seconds") ?? 2,
+                                                             count: try optionalInt(args, "count") ?? 10))
+            case "network_diagnose":
+                return try result(Operations.networkDiagnose(ctx, host: try optionalString(args, "host") ?? "apple.com",
+                                                             quality: try optionalBool(args, "quality") ?? false))
             case "posture_check":
                 return try result(Operations.posture(ctx, ruleIDs: try stringSet(args["ruleIDs"])))
             case "posture_explain":

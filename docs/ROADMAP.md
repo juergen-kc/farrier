@@ -205,7 +205,8 @@ cleanup --system`, a root-only quarantine, restore and expiry with approval).
 
 Done so far: snapshots and diffs (`farrier snapshot create|list|diff|delete`, MCP `snapshot_create`, `snapshot_list`,
 `snapshot_diff`, the `farrier://snapshot/{id}` resource and the `what-changed` runbook)); `log_query`, `power_history` and
-`crash_reports` (`farrier debug logs|power|crashes`) with the `why-did-it-wake` runbook.
+`crash_reports` (`farrier debug logs|power|crashes`) with the `why-did-it-wake` runbook; `network_diagnose` and
+`process_snapshot` (`farrier debug network|processes`) with the `why-is-it-slow` runbook. Next: `sysdiagnose_summarize`.
 
 - Snapshots and diffs
 - Debugging tools: `log_query`, `power_history`, `crash_reports`, `network_diagnose`,

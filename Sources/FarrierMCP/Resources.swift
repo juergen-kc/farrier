@@ -93,6 +93,8 @@ public enum ToolProgress {
         case "snapshot_create", "snapshot_diff": what = "collecting the inventory and settings"
         case "log_query": what = "searching the unified log"
         case "power_history": what = "reading the power management log"
+        case "process_snapshot": what = "sampling CPU, memory and energy use"
+        case "network_diagnose": what = "checking the route, DNS, proxies and connectivity"
         case "cleanup_scan": what = "measuring caches and logs"
         case "disk_usage": what = "measuring caches, developer data and apps"
         case "cleanup_plan": what = "measuring caches and logs, then planning"

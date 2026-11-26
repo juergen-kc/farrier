@@ -474,6 +474,18 @@ public enum Operations {
         do { return try CrashReports.detail(home: ctx.crashHome, name: name) } catch let e as PlanError { throw OperationError(e.description) }
     }
 
+    public static func processSnapshot(_ ctx: FarrierContext, seconds: Int = 2, count: Int = 10) throws -> ProcessSnapshot {
+        do { return try ProcessSampler.run(seconds: seconds, count: count, runner: ctx.debugRunner) } catch let e as PlanError {
+            throw OperationError(e.description)
+        }
+    }
+
+    public static func networkDiagnose(_ ctx: FarrierContext, host: String = "apple.com", quality: Bool = false) throws -> NetworkReport {
+        do { return try NetworkDiagnose.run(host: host, quality: quality, runner: ctx.debugRunner) } catch let e as PlanError {
+            throw OperationError(e.description)
+        }
+    }
+
     // MARK: Snapshots
 
     static func liveSnapshot(_ ctx: FarrierContext, label: String?, now: Date) -> Snapshot {

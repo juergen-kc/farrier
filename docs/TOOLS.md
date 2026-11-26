@@ -2,7 +2,7 @@
 
 > Status: design draft. Names and schemas may change before v0.1. **Implemented so far** (`farrier mcp`):
 > `farrier_status`, `facts_collect`, `posture_check`, `posture_explain`, `posture_plan_remediation`, `plan_show`,
-> `apply_plan`, `plan_undo`, `inventory`, `cleanup_scan`, `snapshot_create`, `snapshot_list`, `snapshot_diff`, `log_query`, `power_history`, `crash_reports`, `disk_usage`, `cleanup_plan`, `quarantine_list`, `quarantine_restore`, `quarantine_plan_expiry`, `journal_recent`, `exceptions_list`, `posture_plan_exception`, and the `security-checkup`
+> `apply_plan`, `plan_undo`, `inventory`, `cleanup_scan`, `snapshot_create`, `snapshot_list`, `snapshot_diff`, `log_query`, `power_history`, `crash_reports`, `network_diagnose`, `process_snapshot`, `disk_usage`, `cleanup_plan`, `quarantine_list`, `quarantine_restore`, `quarantine_plan_expiry`, `journal_recent`, `exceptions_list`, `posture_plan_exception`, and the `security-checkup`
 > prompt.
 > `farrier_status`, `facts_collect`, `journal_recent`, `cleanup_scan` and the two exception tools are additions to this catalog.
 
@@ -71,8 +71,8 @@ with on-device approval for T3 and T4.
 | `log_query` | T0 | Implemented. The unified log (`log show --style ndjson`) filtered by `subsystem`, `process`, `category`, `level` and `text`, which Farrier combines and quotes into a predicate (no raw predicates). At most 24 hours back (`minutes`), and 10 minutes without a subsystem, process or text filter; the newest `limit` (≤ 1000) entries, messages cut at 500 characters. |
 | `power_history` | T0 | Implemented. Sleep, wake, dark-wake and start events from `pmset -g log` over `days` (≤ 30), with counts, the most frequent wake reasons, and what prevents sleep now (`pmset -g assertions`, by process). |
 | `crash_reports` | T0 | Implemented. Crash, hang and panic `.ips` reports from `~/Library/Logs/DiagnosticReports` and `/Library/Logs/DiagnosticReports`, newest first (`days`, `process`, `includeOther`). With `report` (a file name from the list, never a path): exception, signal, termination, the app's note, the crashed thread's top frames, or the panic string. |
-| `network_diagnose` | T0 (network) | Interfaces, DNS, routes, proxy, `networkQuality`. |
-| `process_snapshot` | T0 | Top CPU, memory and energy consumers, with a short sampling window. |
+| `network_diagnose` | T0 (network) | Implemented. The default route and primary interface (addresses, status), DNS resolvers and search domains, HTTP/HTTPS/SOCKS proxies and PAC, and timed checks: a DNS lookup (`dscacheutil`) and a TCP connect to `host`:443 (default apple.com; only hostnames are accepted). With `quality`, `networkQuality` too. |
+| `process_snapshot` | T0 | Implemented. Two `top` samples `seconds` apart (1–10): CPU user/system/idle, load, memory used/wired/compressed/unused, swap, and the top `count` processes by CPU, memory and energy impact. Command names only, never arguments. |
 | `sysdiagnose_summarize` | T1 (long, Tasks) | Collect a sysdiagnose and return the key findings. |
 
 ## Management adapters
@@ -117,10 +117,11 @@ Mac is data, and nothing is applied unless the user asks):
 - `management-overview`: MDM enrollment, profiles, and which settings they control.
 - `why-did-it-wake`: the sleep and wake pattern, wake reasons in plain words, what keeps the Mac awake, and the
   power management log around a wake when needed.
+- `why-is-it-slow`: CPU, memory pressure and energy by process, disk space, and the network when the slowness is
+  online; what's normal and what the user can do (Farrier doesn't stop processes).
 - `what-changed`: the latest snapshot (or two named ones) against now, with what deserves a look first; offers to
   save a first snapshot if there is none.
 - `free-up-space`: disk usage, what the cleanup rules match, and when space actually comes back (the quarantine frees
   nothing until it's emptied); plans a cleanup only for what the user picks.
 
-Planned, when their tools exist: `why-is-it-slow`,
-`prepare-for-handover` (posture, cleanup, and inventory export before giving a Mac to someone else).
+Planned, when its tools exist: `prepare-for-handover` (posture, cleanup, and inventory export before giving a Mac to someone else).

@@ -372,8 +372,8 @@ struct SnapshotCommand: ParsableCommand {
 struct DebugCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "debug",
-        abstract: "Look into problems: the unified log, sleep and wake, crash reports. Read-only.",
-        subcommands: [Logs.self, Power.self, Crashes.self]
+        abstract: "Look into problems: the unified log, sleep and wake, crash reports, processes, the network. Read-only.",
+        subcommands: [Logs.self, Power.self, Crashes.self, Processes.self, Network.self]
     )
 
     static func run<T>(_ body: () throws -> T) throws -> T {
@@ -439,6 +439,64 @@ struct DebugCommand: ParsableCommand {
             }
             print("\nkeeping the Mac awake now:\(h.assertions.isEmpty ? " nothing" : "")")
             for a in h.assertions { print("  \(a.process)\(a.pid.map { " (\($0))" } ?? ""): \(a.type)\(a.name.map { " — \($0)" } ?? "")") }
+        }
+    }
+
+    struct Processes: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "What's using CPU, memory and energy right now (two samples).")
+
+        @Option(help: "Seconds between the two samples (1 to 10).") var seconds = 2
+        @Option(help: "Processes per list.") var count = 10
+        @Flag(help: "Output JSON.") var json = false
+
+        func run() throws {
+            let p = try DebugCommand.run { try Operations.processSnapshot(FarrierContext.live(actor: "cli"), seconds: seconds, count: count) }
+            if json { try Output.json(p); return }
+            func b(_ v: Int64?) -> String { v.map(ByteCount.format) ?? "?" }
+            func pct(_ v: Double?) -> String { v.map { String(format: "%.0f%%", $0) } ?? "?" }
+            print("CPU: \(pct(p.cpuUser)) user, \(pct(p.cpuSystem)) system, \(pct(p.cpuIdle)) idle; load \(p.load.map { String(format: "%.2f", $0) }.joined(separator: " "))")
+            print("memory: \(b(p.memoryUsed)) used (\(b(p.memoryWired)) wired, \(b(p.memoryCompressed)) compressed), \(b(p.memoryUnused)) unused; swap \(b(p.swapUsed)) of \(b(p.swapTotal))")
+            func table(_ title: String, _ rows: [ProcessUsage]) {
+                guard !rows.isEmpty else { return }
+                print("\n\(title)")
+                for r in rows {
+                    print("  \(String(format: "%6.1f%%", r.cpu))  \(ByteCount.format(r.memory).padding(toLength: 9, withPad: " ", startingAt: 0)) \(r.energy.map { String(format: "%6.1f", $0) } ?? "     -")  \(r.command) (\(r.pid))")
+                }
+            }
+            print("\n     CPU   memory    energy  process")
+            table("by CPU", p.byCPU)
+            table("by memory", p.byMemory)
+            table("by energy impact", p.byEnergy)
+        }
+    }
+
+    struct Network: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Route, interface, DNS, proxies, and timed DNS and HTTPS checks.")
+
+        @Option(help: "Hostname to check.") var host = "apple.com"
+        @Flag(help: "Also run networkQuality (about 20 seconds).") var quality = false
+        @Flag(help: "Output JSON.") var json = false
+        @OptionGroup var redaction: RedactOption
+
+        func run() throws {
+            redaction.apply()
+            let n = try DebugCommand.run { try Operations.networkDiagnose(FarrierContext.live(actor: "cli"), host: host, quality: quality) }
+            if json { try Output.json(n); return }
+            if let r = n.route { print("default route: \(r.gateway ?? "?") via \(r.interface ?? "?")") }
+            if let i = n.interface { print("\(i.name): \(i.status ?? "?"), \((i.ipv4 + i.ipv6).joined(separator: ", "))") }
+            for r in n.resolvers {
+                print("DNS\(r.domain.map { " (\($0))" } ?? ""): \(r.nameservers.joined(separator: ", "))\(r.searchDomains.isEmpty ? "" : "; search \(r.searchDomains.joined(separator: ", "))")")
+            }
+            if let p = n.proxies {
+                let set = [("HTTP", p.http), ("HTTPS", p.https), ("SOCKS", p.socks), ("PAC", p.autoConfigURL)].compactMap { k, v in v.map { "\(k) \($0)" } }
+                print("proxies: \(set.isEmpty ? (p.autoDiscovery ? "auto-discovery" : "none") : set.joined(separator: ", "))")
+            }
+            for c in n.checks { print("\(c.ok ? "ok  " : "FAIL") \(c.name): \(c.detail)\(c.milliseconds.map { " (\($0) ms)" } ?? "")") }
+            if let q = n.quality {
+                print(String(format: "quality: %.0f Mbps down, %.0f Mbps up, responsiveness %.0f RPM, base RTT %.0f ms",
+                             q.downloadMbps ?? 0, q.uploadMbps ?? 0, q.responsivenessRPM ?? 0, q.baseRTTms ?? 0))
+            }
+            for note in n.notes { print("note: \(note)") }
         }
     }
 

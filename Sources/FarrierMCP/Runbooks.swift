@@ -146,6 +146,20 @@ public enum Runbooks {
             an assertion); Farrier doesn't change these settings.
             """
         },
+        Runbook(name: "why-is-it-slow", title: "Why is my Mac slow?",
+                description: "Look at CPU, memory, swap, energy, disk space and the network",
+                arguments: [], tools: ["process_snapshot", "disk_usage", "network_diagnose"]) { _ in
+            """
+            Help me find out why this Mac is slow. Call process_snapshot (seconds: 3): say whether the CPU is busy and \
+            which processes use it, whether memory is under pressure (a lot compressed, swap in use, little unused) and \
+            what holds it, and what uses the most energy. Call disk_usage: a nearly full disk (under about 10% free) \
+            slows everything down. If it sounds like the slowness is on the internet (pages, downloads, calls), call \
+            network_diagnose and look at DNS, the HTTPS check and proxies. Explain what you found in plain words, what \
+            is normal (indexing after an update, a build, a browser with many tabs), and what I could do myself (quit an \
+            app, restart one that leaks memory, free disk space with the free-up-space runbook). Farrier doesn't stop \
+            processes.
+            """
+        },
         Runbook(name: "management-overview", title: "Who manages this Mac?",
                 description: "Explain MDM enrollment, configuration profiles and which settings they control",
                 arguments: [], tools: ["posture_check", "inventory"]) { _ in
